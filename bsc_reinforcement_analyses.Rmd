@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(beepr, janitor, SDLfilter, tidyverse)
+pacman::p_load(atlastools, beepr, janitor, ggmap, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -34,15 +34,118 @@ We translocated 36 adult captive-bred bush stone-curlews from Mt Rothwell captiv
 
 All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaning birds except one, ahead of the 3G shutdown).
 
-We needed to clean the data to remove GPS errors. We cleaned the data using a combination of: 
+High throughput animal tracking data require filtering to remove erroneous points, while maintaining real movement data. We follow the workflow by [Gupte et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.13610), that is:
 
-* quality indices (number of satellites)
-* biologically realistic movement (based on altitude) and 
-* biologically realistic movement (based on speed and turning angles). 
+1) temporal filtering (mostly done on Movebank by setting deployment period)
+2) filtering by quality covariates
+3) filtering biologically unrealistic movement
+4) median smoothing
+
+## Test pipeline
+
+We first tested the pipeline with a subset of the data (bird "Marmalade").
+
+1) Temporal filtering
+
+We removed points after the end of the study period. 
+
+```{r}
+# import data from movebank
+test1 <- readr::read_csv("movebank/Marmalade01.csv") %>%
+  clean_names() %>%
+  # Time in posix format
+  mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
+         date = as.Date(datetime)) %>%
+  # Remove days after end of tracking period - for Marmalade whose GPS not removed
+  filter(date < "2024-01-12")
+
+# plot raw data
+ggmap(map_z13)+
+  geom_path(data=test1, aes(location_long, location_lat), 
+            colour = "yellow", alpha = .6)+
+  geom_point(data=test1, aes(location_long, location_lat), 
+             colour = "yellow", alpha = .6)+
+  theme_void()
+```
+
+2) Filtering by quality covariates
+
+In the past I've found filtering by satellite count and hdop has a high rate of false positives (removing real movement) and low rate of true positives (removing unrealistic movement) so we don't want to be overly aggressive with the application of these filters.
+
+```{r}
+# Histogram of satellite vales
+hist(test1$gps_satellite_count)
+
+# Plot track, colour by satellite values
+ggmap(map_z13)+
+  geom_path(data=test1, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=test1, aes(location_long, location_lat, colour = gps_satellite_count))+
+  scale_colour_viridis_c()+
+  theme_void()
+```
+
+Most points have a satellite count >=4. Not many of the obvious spikes have low satellite count. We'll filter to include only satellite count >=4. 
+
+```{r}
+# Histogram of satellite vales
+hist(test1$gps_hdop)
+
+# Plot track, colour by hdop values
+ggmap(map_z13)+
+  geom_path(data=test1, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=test1, aes(location_long, location_lat, colour = gps_hdop))+
+  scale_colour_viridis_c()+
+  theme_void()
+```
+
+There are a handful of massive hdop values (5-15) but the vast majority are =<2. Again the obvious spikes don't have high hdop values. We'll filter to only include hdop =<2. 
+
+Whereas I've found better filtering on the basis of altitude. 
+
+Incorrect GPS fixes often have incorrect altitude. High altitude was not expected as no birds were undertaking long-distance flight, which is the only time high altitude is possible. All birds were wing-clipped on release and some later moulted and undertook short-distance flight, but not at high altitude. 
+
+```{r}
+# Histogram altitude
+hist(data_dup$height_above_msl)
+
+# Summary statistics altitude
+summary(data_dup$height_above_msl)
+quantile(data_dup$height_above_msl, probs = 0.99)
+
+# Plot track, colour by altitude values
+ggmap(map_z13)+
+  geom_path(data=test1, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=test1, aes(location_long, location_lat, colour = height_above_msl))+
+  scale_colour_viridis_c()+
+  theme_void()
+```
+
+The median flight height was 129m, the minimum was -1974m and the maximum was 9999m. These min and maximums were considered unrealistic.
+
+Most of the data that looks real is at ground altitude. Many of the obvious spikes have high or low altitude. 
+
+We cut off the maximum altitude at 262m (at the 0.99 quartile) and the minimum to 20m (ground elevation asl at Mt Rothwell). 
+
+```{r}
+# Apply quality covariate filters
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Quality indices
 
-We removed duplicate values and fixes taken with less than 4 satellites using the dupfilter from SDLfilter. 
+We removed fixes taken with less than 4 satellites using the dupfilter from SDLfilter. 
 
 ```{r}
 # Import data from movebank
@@ -52,17 +155,51 @@ data_raw <- readr::read_csv(fs::dir_ls(path = "movebank/")) %>%
   mutate(DateTime = as.POSIXct(study_local_timestamp, 
                                  "%Y-%m-%d %H:%M:%S"),
          date = as.Date(DateTime),
-  # Rename columns for SDLfilter
-         id = individual_local_identifier,
-         lat = location_lat,
-         lon = location_long,
-         qi = gps_satellite_count) %>%
   # Remove days after end of tracking period - for Marmalade whose GPS not removed
   filter(date < "2024-01-12")
 
 # Remove duplicate values and satellite count <4
-data_dupfilt <- dupfilter(data_raw)
+data_dup <- dupfilter(data_raw)
 ```
+
+dupfilter_exact removed 2 of 1776702 locations
+dupfilter_qi removed 3660 of 1776700 locations
+dupfilter_time removed 1 of 1773040 locations
+dupfilter_space removed 1896 of 1773039 locations
+
+Input data: 1776702 locations
+Filtered data: 1771143 locations
+dupfilter removed 5559 locations (0.31% of original data)
+
+## Altitude filtering
+
+Incorrect GPS fixes often have incorrect altitude (due to the coincidence of horizontal and vertical dilution of precision).High altitude was not expected as no birds were undertaking long-distance flight, which is the only time high altitude is possible. All birds were wing-clipped on release and some later moulted and undertook short-distance flight, but not at high altitude. 
+
+```{r}
+# Histogram altitude
+hist(data_dup$height_above_msl)
+
+# Summary statistics altitude
+summary(data_dup$height_above_msl)
+quantile(data_dup$height_above_msl, probs = 0.99)
+```
+
+The median flight height was 129m, the minimum was -1974m and the maximum was 9999m. These min and maximums were considered unrealistic.
+
+We cut off the maximum altitude at 262m (at the 0.99 quartile) and the minimum to 20m (ground elevation asl at Mt Rothwell). 
+
+```{r}
+# Filter data to realistic altitude
+data_alt <- data_dup %>%
+  filter(height_above_msl < 262 & height_above_msl > 20)
+
+# Histogram altitude
+hist(data_alt$height_above_msl)
+```
+
+Input data: 1771143 locations
+Filtered data: 1719843 locations
+Altitude filtering removed 51300 locations (2.90% of original data)
 
 ## Speed/angle-based filtering
 We applied speed-based filtering using the custom function by Gunner (2023), where user defined speed-thresholds are refined using isolation forest models as a method of unsupervised anomaly  detection. 
@@ -761,14 +898,19 @@ Gundog.GPS.Filter = function(TS, Longitude, Latitude, Drop.out = 300, Window.len
 #GPS.df = df.sub[["df"]]
 ```
 
-A test case on one bird was previously used to refine the user input threshold values until visual inspection showed good performance on reducing obvious outliers (not included here). This was applied to all birds. 
+A test case on one bird was previously used to refine the user input threshold values until visual inspection showed good performance on reducing obvious outliers (not included here). This was applied to all birds in this study. 
+
+Note: takes 5-30 seconds per bird.
 
 ```{r}
-# Loop through all birds 🐢🐢
-speed_filt <- data.frame()
+# Birds list
+birds <- unique(data_alt$id)
+
+# Loop through all birds 🐢
+data_filt <- data.frame()
 
 for(i in 1:length(birds)){
- subset <- filter(data_dupfilt, id == birds[i])
+ subset <- filter(data_alt, id == birds[i])
  
  temp <- Gundog.GPS.Filter(
   TS = subset$DateTime,
@@ -786,22 +928,50 @@ for(i in 1:length(birds)){
   rename(DateTime = Timestamp) %>%
   left_join(subset)
   
- speed_filt <- rbind(speed_filt, temp)
+ data_filt <- rbind(data_filt, temp)
  
  print(paste("Completed processing for", as.character(birds[i])))
  
 }; beep()
-
-# Plot filtering by bird to visually inspect outcome
-ggplot()+
-  geom_path(data=speed_filt, aes(Longitude, Latitude), colour = "black", alpha = .6)+
-  geom_point(data=filter(speed_filt, Verdict_IF == "Possible outlier"),
-             aes(Longitude, Latitude), colour = "purple")+
-  geom_point(data=filter(speed_filt, Verdict_IF == "Unanimous outlier"), 
-             aes(Longitude, Latitude), colour = "red")+
-  geom_point(data=filter(speed_filt, Verdict_IF == "Not anomalous"), 
-             aes(Longitude, Latitude), colour = "black")+
-  facet_wrap(~id) + 
-  theme_void()
 ```
 
+We then plotted the filtering results against a satellite map to visualise and check the effectiveness. 
+
+```{r}
+# Plot filtering by bird to visually inspect outcome
+for(i in 1:length(birds)){
+ subset <- filter(data_filt, id == birds[i])
+ 
+ map <- ggmap(map_z13)+
+   geom_path(data=subset, aes(Longitude, Latitude), colour = "black", alpha = .6)+
+   geom_point(data=filter(subset, Verdict_IF == "Possible outlier"),
+             aes(Longitude, Latitude), colour = "purple", alpha = 0.8)+
+   geom_point(data=filter(subset, Verdict_IF == "Unanimous outlier"), 
+             aes(Longitude, Latitude), colour = "red", alpha = 0.8)+
+   geom_point(data=filter(subset, Verdict_IF == "Not anomalous"), 
+             aes(Longitude, Latitude), colour = "blue", alpha = 0.8)+
+   geom_point(data=filter(subset, Verdict_IF == "Not anomalous" & height_above_msl >100), 
+             aes(Longitude, Latitude), colour = "green", alpha = 0.8)
+   theme_void()
+ 
+ filename <- paste("maps/datafiltmap_", birds[i], ".jpeg", sep = "")
+ 
+ ggsave(filename = filename, plot = map)
+}
+```
+
+We save the filtered data to a smaller file (less columns). 
+
+```{r}
+# Filter to non-outlier points and select columns to retain
+data_clean <- data_filt %>%
+  filter(Verdict_IF == "Not anomalous") %>%
+  select(c("id", "study_local_timestamp", "lon", "lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "height_above_msl", "utm_easting", "utm_northing", "utm_zone", "ground_speed", "heading"))
+
+# Save to file
+write.csv(data_filt, "data/gpsclean.csv", row.names = FALSE)
+```
+
+Input data: 1719843 locations
+Filtered data: 1701926 locations
+Gundog filter removed 17917 locations (1.04% of original data)
