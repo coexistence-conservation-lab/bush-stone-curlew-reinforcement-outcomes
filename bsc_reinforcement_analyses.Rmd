@@ -478,6 +478,73 @@ Save data - dropping unneeded columns to save space.
 
 ```{r}
 data <- data_smooth %>%
-  select(c("location_long", "location_lat", ""))
+  select(c("id", "datetime", "timestamp", "location_long", "location_lat", "utm_easting", "utm_northing", "utm_zone", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
+  rename(longitude = location_long,
+         latitude = location_lat,
+         time_local = datetime,
+         time_utc = timestamp) %>%
+  # fix posix time
+  mutate
+
+write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
+```
+
+# Movement analysis
+
+Read in clean data
+
+```{r}
+# Read in cleaned data 
+data <- read.csv("data/data_cleaned.csv") %>%
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne"),
+         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "UTC"),
+         date = as.Date(time_local))
+
+# Summary statistic: number of tracked days
+length(unique(data$date))
+
+# Summary statistic: total number of tracked days per bird
+print(data %>%
+  group_by(id) %>%
+  summarise(length(unique(date))), n=35)
+
+print(data %>%
+  group_by(id) %>%
+  summarise(days = length(unique(date))) %>%
+  summarise(birddays = sum(days)))
+```
+
+Birds were tracked for a total of 445 days between June 2022 and January 2024 for a total of 5225 tracking days (sum of each bird's tracking duration). 
+
+## Acclimation period
+
+How long does it take birds to settle? Distance moved per day over time. 
+
+```{r}
+# Make amt format tracks
+track <- data %>%
+  na.omit() %>%
+  make_track(.x = utm_easting, .y = utm_northing, .t = time_local, id = id)
+
+# add step length and date
+track <- track %>%
+  mutate(step = step_lengths(track),
+         date = as.Date(t_))
+
+# plot step length on map to see if it makes sense - testing with Marmalade
+ggplot()+
+  geom_path(data = filter(track, id == "Marmalade"), aes(x_, y_, colour = step))+
+  scale_colour_viridis_c()+
+  coord_sf()+
+  theme_void()
+
+# Calculate daily distance moved
+move <- track %>%
+  group_by(id, date) %>%
+  summarise(distance = sum(step)/1000)
+
 ```
 
