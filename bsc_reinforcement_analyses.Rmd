@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(atlastools, beepr, janitor, ggmap, sf, terra, tidyterra, tidyverse)
+pacman::p_load(atlastools, beepr, janitor, ggmap, move, sf, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -519,9 +519,20 @@ print(data %>%
 
 Birds were tracked for a total of 445 days between June 2022 and January 2024 for a total of 5225 tracking days (sum of each bird's tracking duration). 
 
+## Day/night
+
+Rather than splitting data on calendar days we want to split the data by night (across midnight) given they are nocturnal. We use the sunrise/sunset time to add bird date to the data. 
+
+```{r}
+
+```
+
+
 ## Acclimation period
 
 How long does it take birds to settle? Distance moved per day over time. 
+
+Attemp with amt
 
 ```{r}
 # Make amt format tracks
@@ -546,5 +557,22 @@ move <- track %>%
   group_by(id, date) %>%
   summarise(distance = sum(step)/1000)
 
+ggplot(move)+
+  geom_density(aes(distance, fill = id), alpha = 0.6)
 ```
+
+Attempt with movestack - this was slow and annoying
+
+```{r}
+# format for use with move package
+data <- data %>%
+  na.omit() 
+  
+movestack<- move(data = data, x = data$utm_easting, y = data$utm_northing, time = data$time_local, animal = data$id, proj = crs("EPSG:32755"))
+
+data$distance <- unlist(lapply(distance(movestack), c, NA))
+```
+
+Attempt with terra
+
 
