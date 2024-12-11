@@ -51,21 +51,21 @@ We removed points after the end of the study period.
 
 ```{r}
 # import data from movebank
-test1 <- readr::read_csv("movebank/Fauna01.csv", show_col_types = FALSE) %>%
+data_raw <- readr::read_csv("movebank/Fauna01.csv", show_col_types = FALSE) %>%
   rbind(readr::read_csv("movebank/Marmalade01.csv", show_col_types = FALSE)) %>%
   clean_names() %>%
   # Time in posix format
   mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
          date = as.Date(datetime)) %>%
-  # Remove days after end of tracking period - for Marmalade whose GPS not removed
+  # Remove days after end of tracking period
   filter(date < "2024-01-12") %>%
   rename(id = individual_local_identifier)
 
 # plot raw data
 ggmap(map_z13)+
-  geom_path(data=test1, aes(location_long, location_lat), 
+  geom_path(data=data_raw, aes(location_long, location_lat), 
             colour = "yellow", alpha = .6)+
-  geom_point(data=test1, aes(location_long, location_lat), 
+  geom_point(data=data_raw, aes(location_long, location_lat), 
              colour = "yellow", alpha = .6)+
   theme_void()+
   facet_wrap(~id)
@@ -77,12 +77,12 @@ In the past I've found filtering by satellite count and hdop has a high rate of 
 
 ```{r}
 # Histogram of satellite vales
-hist(test1$gps_satellite_count)
+hist(data_raw$gps_satellite_count)
 
 # Plot track, colour by satellite values
 ggmap(map_z13)+
-  geom_path(data=test1, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=test1, aes(location_long, location_lat, colour = gps_satellite_count))+
+  geom_path(data=data_raw, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=data_raw, aes(location_long, location_lat, colour = gps_satellite_count))+
   scale_colour_viridis_c()+
   theme_void()+
   facet_wrap(~id)
@@ -90,14 +90,16 @@ ggmap(map_z13)+
 
 Most points have a satellite count >=4. Not many of the obvious spikes have low satellite count. We'll filter to include only satellite count >=4. 
 
+Now look at the horizontal dilution of precision (HDOP).
+
 ```{r}
-# Histogram of satellite vales
-hist(test1$gps_hdop)
+# Histogram of hdop vales
+hist(data_raw$gps_hdop)
 
 # Plot track, colour by hdop values
 ggmap(map_z13)+
-  geom_path(data=test1, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=test1, aes(location_long, location_lat, colour = gps_hdop))+
+  geom_path(data=data_raw, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=data_raw, aes(location_long, location_lat, colour = gps_hdop))+
   scale_colour_viridis_c()+
   theme_void()+
   facet_wrap(~id)
@@ -116,50 +118,50 @@ First we need to find flight height altitude by correcting for ground elevation.
 fabdem <- rast("S38E144_FABDEM_V1-0.tif") 
 
 # convert data to spatial points
-coords <- test1 %>%
+coords <- data_raw %>%
   vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
 
 # Extract dem and add to dataframe
-test2 <- test1 %>%
+data_alt <- data_raw %>%
   mutate(terra::extract(fabdem, coords, ID = FALSE)) %>%
   rename(elevation = "S38E144_FABDEM_V1-0") %>%
   # calculate flight height
   mutate(altitude = height_above_msl - elevation)
 
 # Histogram altitude
-hist(test2$altitude)
+hist(data_alt$altitude)
 
 # Summary statistics altitude
-summary(test2$altitude)
-quantile(test2$altitude, probs = 0.95)
+summary(data_alt$altitude)
+quantile(data_alt$altitude, probs = 0.95)
 
 # Plot track, colour by altitude values
 ggmap(map_z13)+
-  geom_path(data=test2, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=test2, aes(location_long, location_lat, colour = altitude))+
+  geom_path(data=data_alt, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=data_alt, aes(location_long, location_lat, colour = altitude))+
   scale_colour_viridis_c()+
   theme_void()+
   facet_wrap(~id)
 ```
 
-The median altitude (above the ground) was 9m. The min (-2060m) and max (8313m) altitude were considered unrealistic. Most of the data that looks real is at ground altitude. Many of the obvious spikes have high or low altitude. 
+The median altitude (above the ground surface) was 9m. The min (-2060m) and max (8313m) altitude were considered unrealistic. Many of the obvious spikes have very high or negative altitude. 
 
 We cut off the maximum altitude at 60 (just above the 0.95 quartile) and the minimum to -10m (ground level allowing for some error).
 
 ```{r}
 # Apply quality covariate filters
-test2 <- test2 %>%
+data_qfilt <- data_alt %>%
   filter(gps_satellite_count >= 4) %>%
   filter(gps_hdop <=2) %>%
   filter(altitude < 60 & altitude >-10)
 
 # Plot effect of filtering
 ggmap(map_z13)+
-  geom_path(data=test1, aes(location_long, location_lat), 
+  geom_path(data=data_raw, aes(location_long, location_lat), 
             colour = "purple", alpha = .6)+
-  geom_point(data=test1, aes(location_long, location_lat), 
+  geom_point(data=data_raw, aes(location_long, location_lat), 
              colour = "yellow")+
-  geom_point(data=test2, aes(location_long, location_lat), 
+  geom_point(data=data_qfilt, aes(location_long, location_lat), 
              colour = "purple")+
   theme_void()+
   facet_wrap(~id)
@@ -173,80 +175,130 @@ To remove spikes in the data we can filter out positions with extreme incoming a
 
 ```{r}
 # Append turning angle, incoming/outgoing speeds to data frame per bird
-birds <- unique(test1$id)
+birds <- unique(data_raw$id)
 
-test3 <- data.frame()
+data_speed <- data.frame()
 
 for(i in 1:length(birds)){
- subset <- filter(test2, id == birds[i])
+ subset <- filter(data_qfilt, id == birds[i])
 
  temp <- subset %>%
-   mutate(speed_in  = atl_get_speed(
-    data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("in")),
-         speed_out = atl_get_speed(
+   mutate(speed_in  = atl_get_speed( 
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("in")),
+    speed_out = atl_get_speed(
            data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("out")),
-         angle = atl_turning_angle(
-           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime"))
+    angle = atl_turning_angle(
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime"),
+    speed_delta = abs(speed_in - speed_out)
+    )
  
- test3 <- rbind(test3, temp)
+ data_speed <- rbind(data_speed, temp)
 }
 
 # Histogram incoming speeds
-hist(test3$speed_in)
+hist(data_speed$speed_in)
 
 # Summary statistics incoming speeds
-summary(test3$speed_in)
-quantile(test3$speed_in, probs = 0.99, na.rm = TRUE)
+summary(data_speed$speed_in)
+quantile(data_speed$speed_in, probs = 0.99, na.rm = TRUE)
 
 # Histogram outgoing speeds
-hist(test3$speed_out)
+hist(data_speed$speed_out)
 
 # Summary statistics outgoing speeds
-summary(test3$speed_out)
-quantile(test3$speed_out, probs = 0.99, na.rm = TRUE)
+summary(data_speed$speed_out)
+quantile(data_speed$speed_out, probs = 0.95, na.rm = TRUE)
 
 # Histogram turning angle
-hist(test3$angle)
+hist(data_speed$angle)
 
 # Summary statistics turning angle
-summary(test3$angle)
+summary(data_speed$angle)
+
+# Histogram difference between incoming and outgoing speed
+hist(data_speed$speed_delta)
+
+# Summary statistics difference between incoming and outgoing speed
+summary(data_speed$speed_delta)
+quantile(data_speed$speed_delta, probs = 0.95, na.rm = TRUE)
 
 # Plot track, colour by speed
 ggmap(map_z14)+
-  geom_path(data=test3, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=test3, aes(location_long, location_lat, colour = speed_in))+
+  geom_path(data=data_speed, aes(location_long, location_lat), colour = "white")+
+  geom_point(data=data_speed, aes(location_long, location_lat, colour = speed_delta))+
   scale_colour_viridis_c()+
   theme_void()+
   facet_wrap(~id)
 ```
 
-Speeds were usually <2m/s and outgoing speeds while turning are likely <1m/s. A sharp turning angle was defined as <90 degrees. 
+Speeds were usually <2m/s and outgoing speeds while turning are likely <1m/s. A sharp turning angle was defined as <90 degrees. Sharp increase/decrease in speed also isn't expected, with the vast majority of difference between incoming and outgoing speed 0.1m/s.
 
-We defined biologically realistic movement as speeds <2m/s (a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind) and turning speeds of 1m/s. 
+We defined biologically realistic movement as speeds <2m/s (a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind), turning speeds of 0.5m/s, and delta speed as 0.4m/s. 
 
 ```{r}
 # Apply turning angle filtering
-test3 <- test3 %>%
+data_sfilt <- data_speed %>%
   filter(speed_in < 2) %>%
-  filter(!(speed_out >1 & angle <90))
+  filter(speed_delta < 0.4) %>%
+  filter(!(speed_out >0.5 & angle <90))
 
 # Plot effect of filtering
 ggmap(map_z14)+
-  geom_path(data=test1, aes(location_long, location_lat), 
+  geom_path(data=data_raw, aes(location_long, location_lat), 
             colour = "purple", alpha = .6)+
-  geom_point(data=test1, aes(location_long, location_lat), 
+  geom_point(data=data_raw, aes(location_long, location_lat), 
              colour = "yellow")+
-  geom_point(data=test2, aes(location_long, location_lat), 
+  geom_point(data=data_qfilt, aes(location_long, location_lat), 
              colour = "orange")+
-  geom_point(data=test3, aes(location_long, location_lat), 
+  geom_point(data=data_sfilt, aes(location_long, location_lat), 
              colour = "purple")+
   theme_void()+
   facet_wrap(~id)
 ```
 
-### 4) Spatial filtering
+### 4) Median smoothing
 
-We know Fauna didn't leave the study site during the tracking period but there are points over the fence that have not been removed. So what covariates do these incorrect points have in common? 
+Even after speed/angle filtering, we retain some smaller-scale 'jitter'- these are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We want to apply it sparingly to not reduce track verismilitude.
+
+```{r}
+# Apply median smooth by bird
+data_smooth <- data.frame()
+
+for(i in 1:length(birds)){
+  
+  subset <- filter(data_sfilt, id == birds[i])
+  
+  temp <- atl_median_smooth(data = subset, x = "location_lat", y = "location_long",
+                                  time = "datetime", moving_window = 3)
+  
+  data_smooth <- rbind(data_smooth, temp)
+}
+
+# Plot effect of smoothing
+ggmap(map_z13)+
+  geom_path(data=data_raw, aes(location_long, location_lat), 
+            colour = "yellow", alpha = .6)+
+  geom_path(data=data_smooth, aes(location_long, location_lat), 
+            colour = "purple", alpha = .7)+
+  facet_wrap(~id)
+
+# And zoom in to the fenced area
+ggmap(map_z15)+
+  geom_path(data=data_raw, aes(location_long, location_lat), 
+            colour = "yellow", alpha = .6)+
+  geom_path(data=data_smooth, aes(location_long, location_lat), 
+            colour = "purple", alpha = .7)+
+  facet_wrap(~id)
+
+# And visualise without filtered out data
+ggmap(map_z15)+
+    geom_path(data=data_smooth, aes(location_long, location_lat), 
+            colour = "purple", alpha = .7)+
+  facet_wrap(~id)
+```
+
+*_Visual check using fence polygon._*
+We know Fauna didn't leave the study site during the tracking period so this is a good way to check if filtering was successful. 
 
 First define the fenced area.
 
@@ -290,7 +342,7 @@ Then filter for points from "Fauna" outside of the polygon.
 
 ```{r}
 # Convert df to points
-points <- test3 %>%
+points <- data_smooth %>%
   filter(id=="Fauna") %>%
   vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
 
@@ -300,48 +352,132 @@ outside <- points[!relate(points, mtr, "intersects")] %>%
   
 # Plot points outside polygon 
 ggmap(map_z15)+
-  geom_point(data=outside, aes(x, y, colour = speed_out), size = 2)+
+  geom_point(data=outside, aes(x, y), colour = "yellow", alpha = 0.7, size = 3)+
   geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
   scale_colour_viridis_c()+
   theme_void()
 ```
 
+There are only 65 points outside the fence (given a 30m buffer) which is within tolerance. Interestingly they are all clustered on the southern and eastern fenceline. 
 
-### 4) Median smoothing
+## Apply filtering 
 
-Even after speed/angle filtering, we retain some smaller-scale 'jitter'- these are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We want to apply it sparingly to not reduce track verismilitude.
+We apply all of the above steps to the full dataset. 
 
-```{r}
-# Apply median smooth
-test4 <- atl_median_smooth(data = test3, x = "location_lat", y = "location_long",
-                                  time = "datetime", moving_window = 3)
+### 1) Temporal filtering
 
-# Plot effect of smoothing
-ggmap(map_z13)+
-  geom_path(data=test1, aes(location_long, location_lat), 
-            colour = "yellow", alpha = .6)+
-    geom_path(data=test4, aes(location_long, location_lat), 
-            colour = "purple", alpha = .7)
-
-# Zoom in to smoothed track
-ggmap(map_z15)+
-    geom_path(data=test4, aes(location_long, location_lat), 
-            colour = "purple", alpha = .7)
-```
-
-## Clean data
-
-Apply the cleaning pipeline to all birds in this study.
+Most of this is already done on movebank. We just set the end of study period to 12th January 2024 (only applies to birds whose GPS was not removed).
 
 ```{r}
-# import data from movebank
-test1 <- readr::read_csv(fs::dir_ls(path = "Input/movebank"), show_col_types = FALSE) %>%
+# Import data from movebank
+data_raw <- readr::read_csv(fs::dir_ls(path = "movebank")) %>%
   clean_names() %>%
   # Time in posix format
   mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
          date = as.Date(datetime)) %>%
   # Remove days after end of tracking period - for Marmalade whose GPS not removed
-  filter(date < "2024-01-12")
+  filter(date < "2024-01-12") %>%
+  rename(id = individual_local_identifier)
 ```
 
+### 2) Filtering by quality covariates
+
+We used the following quality covariates:
+
+* Altitude: set to a minimum of -10m (ground level allowing for some error) and a maximum of 60 (just above the 0.95 quartile on test data)
+* HDOP: set to a maximum of 2
+* Satellite count: set to a minimum of 4
+
+```{r}
+# read in FABDEM
+fabdem <- rast("S38E144_FABDEM_V1-0.tif") 
+
+# convert data to spatial points
+coords <- data_raw %>%
+  vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
+
+# Extract dem and add to dataframe
+data_alt <- data_raw %>%
+  mutate(terra::extract(fabdem, coords, ID = FALSE)) %>%
+  rename(elevation = "S38E144_FABDEM_V1-0") %>%
+  # calculate flight height
+  mutate(altitude = height_above_msl - elevation)
+
+# Apply quality covariate filters
+data_qfilt <- data_alt %>%
+  filter(gps_satellite_count >= 4) %>%
+  filter(gps_hdop <=2) %>%
+  filter(altitude < 60 & altitude >-10)
+
+# Filtering effect
+print(paste("Percentage original data removed: ", round(((nrow(data_raw)-nrow(data_qfilt)) / nrow(data_raw))*100), "%", sep = ""))
+```
+
+### 3) Filtering biologically unrealistic movement
+
+We defined (from test data) biologically realistic movement as speeds <2m/s (a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind), turning speeds of 0.5m/s, and delta speed as 0.4m/s. 
+
+```{r}
+# Append turning angle, incoming/outgoing/delta speeds to data frame per bird
+birds <- unique(data_raw$id)
+
+data_speed <- data.frame()
+
+for(i in 1:length(birds)){
+ subset <- filter(data_qfilt, id == birds[i])
+
+ temp <- subset %>%
+   mutate(speed_in  = atl_get_speed( 
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("in")),
+    speed_out = atl_get_speed(
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("out")),
+    angle = atl_turning_angle(
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime"),
+    speed_delta = abs(speed_in - speed_out)
+    )
+ 
+ data_speed <- rbind(data_speed, temp)
+}
+
+# Apply turning angle and speed filtering
+data_sfilt <- data_speed %>%
+  filter(speed_in < 2) %>%
+  filter(speed_delta < 0.4) %>%
+  filter(!(speed_out >0.5 & angle <90))
+
+# Filtering effect
+print(paste("Percentage original data removed: ", round(((nrow(data_qfilt)-nrow(data_sfilt)) / nrow(data_qfilt))*100), "%", sep = ""))
+```
+
+### 4) Median smoothing
+
+To remove small-scale jitter. We used the smallest possible moving window (3) to retain as much real movement as possible. 
+
+```{r}
+# Apply median smooth by bird
+data_smooth <- data.frame()
+
+for(i in 1:length(birds)){
+  
+  subset <- filter(data_sfilt, id == birds[i])
+  
+  temp <- atl_median_smooth(data = subset, x = "location_lat", y = "location_long",
+                                  time = "datetime", moving_window = 3)
+  
+  data_smooth <- rbind(data_smooth, temp)
+}
+
+# Plot smoothed data
+ggmap(map_z14)+
+  geom_path(data=data_smooth, aes(location_long, location_lat, colour = id), alpha = .7)+
+  scale_colour_viridis_d()+
+  theme_void()
+```
+
+Save data - dropping unneeded columns to save space. 
+
+```{r}
+data <- data_smooth %>%
+  select(c("location_long", "location_lat", ""))
+```
 
