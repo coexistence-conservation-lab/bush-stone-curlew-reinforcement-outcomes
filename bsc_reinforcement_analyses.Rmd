@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, suncalc, survival, survminer, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -24,8 +24,11 @@ map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
 # Metadata - translocation information
 metadata  <- read.csv("data/metadata.csv") %>%
   clean_names() %>%
-  rename(id = identity) %>%
-  mutate(start_date = as_date(dmy(start_date)))
+  rename(id = identity,
+         mortality = mortality_or_capture) %>%
+  mutate(start_date = as_date(dmy(start_date)),
+         end_date = as_date(dmy(end_date)),
+         mortality = as_date(dmy(mortality)))
 ```
 
 # Introduction
@@ -520,6 +523,48 @@ write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 
 Do reinforcers survive better in the short-term than the residents?
 
+Start by looking at the overall survival probabilities for all birds.
+
+```{r m6}
+# Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
+surv_data <- metadata %>%
+  # remove columns not needed
+  select(!c(location, abbbs, band, alive, release_year)) %>%
+  # add survival time (persistence) - right censored data
+  mutate(time = end_date - start_date) %>%
+  # add status - whether death occurs
+  mutate(status = ifelse(is.na(mortality), 0, 1))
+
+km <- with(surv_data, Surv(time, status))
+  
+# Fit a basic survival model
+kmfit <- survfit(Surv(time, status) ~ 1, data = surv_data)
+
+# Estimated survival probabilities
+summary(kmfit, times = c(1, 10, 30, 100, 365))
+
+# plot
+autoplot(kmfit)
+
+# Fit a survival model by cohort
+kmfit_cohort <- survfit(Surv(time, status) ~ cohort, data = surv_data)
+
+# plot
+autoplot(kmfit_cohort)
+
+# Fit Cox Model
+cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
+summary(cox)
+autoplot(survfit(cox))
+```
+
+The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
+
+Now compare cohorts. 
+
+```{r}
+
+```
 
 
 # Movement analysis
