@@ -567,7 +567,6 @@ autoplot(kmfit_cohort)
 # Fit Cox Model
 cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
 summary(cox)
-autoplot(survfit(cox))
 ```
 
 The probability of survival to 54 days for residents is 87% (upper CI = 79%, lower CI = 71%). 
@@ -666,9 +665,11 @@ data_night <- data_sun %>%
 write.csv(data_night, "data/data_clean_night.csv", row.names = FALSE)
 ```
 
-## Acclimation period
+## Distance moved
 
-How long does it take birds to settle? Distance moved per night over time. Calculation is done per bird per day (bird date).
+How long does it take birds to settle? Do acclimation periods differ between cohort.
+
+Distance moved per night over time. Calculation is done per bird per day (bird date).
 
 Test with one bird, "Fauna". 
 
@@ -771,7 +772,7 @@ distance_daily2 <- distance_daily %>%
   # add metadata
   left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
   # calculate time since release
-  mutate(elapsed = as.numeric(date_bird - start_date))
+  mutate(elapsed = as.numeric(date_bird - start_date)) %>%
   # filter to establishment period
   filter(elapsed < 100)
 
@@ -834,3 +835,13 @@ anova(m1)
 ```
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
+
+## Release site fidelity
+
+How far did they move from the release location? 
+
+```{r}
+# release coords
+release  <- c(274423.45, 5801912.85) #(-37.902374, 144.434323)
+```
+
