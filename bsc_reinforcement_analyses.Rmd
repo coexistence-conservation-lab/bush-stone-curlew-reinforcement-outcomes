@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, janitor, ggmap, ggridges, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -20,6 +20,12 @@ ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("a
 map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
 map_z14 <- get_map(c(144.4380, -37.9000), zoom=14, maptype = "satellite")
 map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
+
+# Metadata - translocation information
+metadata  <- read.csv("data/metadata.csv") %>%
+  clean_names() %>%
+  rename(id = identity) %>%
+  mutate(start_date = as_date(dmy(start_date)))
 ```
 
 # Introduction
@@ -47,7 +53,7 @@ We first tested the pipeline with a subset of the data (birds "Marmalade" & "Fau
 
 ### 1) Temporal filtering
 
-We removed points after the end of the study period. 
+We removed points after the end of the study period (4/8/23 at the start of next experiment - translocation to Orana).
 
 ```{r}
 # import data from movebank
@@ -58,7 +64,7 @@ data_raw <- readr::read_csv("movebank/Fauna01.csv", show_col_types = FALSE) %>%
   mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
          date = as.Date(datetime)) %>%
   # Remove days after end of tracking period
-  filter(date < "2024-01-12") %>%
+  filter(date < "2023-08-04") %>%
   rename(id = individual_local_identifier)
 
 # plot raw data
@@ -366,7 +372,7 @@ We apply all of the above steps to the full dataset.
 
 ### 1) Temporal filtering
 
-Most of this is already done on movebank. We just set the end of study period to 12th January 2024 (only applies to birds whose GPS was not removed).
+We removed points after the end of the study period (4/8/23 at the start of next experiment - translocation to Orana).
 
 ```{r}
 # Import data from movebank
@@ -375,8 +381,8 @@ data_raw <- readr::read_csv(fs::dir_ls(path = "movebank")) %>%
   # Time in posix format
   mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
          date = as.Date(datetime)) %>%
-  # Remove days after end of tracking period - for Marmalade whose GPS not removed
-  filter(date < "2024-01-12") %>%
+  # Remove days after end of study
+  filter(date < "2023-08-04") %>%
   rename(id = individual_local_identifier)
 ```
 
@@ -412,6 +418,8 @@ data_qfilt <- data_alt %>%
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_raw)-nrow(data_qfilt)) / nrow(data_raw))*100), "%", sep = ""))
 ```
+
+Percentage original data removed: 28%
 
 ### 3) Filtering biologically unrealistic movement
 
@@ -449,6 +457,8 @@ data_sfilt <- data_speed %>%
 print(paste("Percentage original data removed: ", round(((nrow(data_qfilt)-nrow(data_sfilt)) / nrow(data_qfilt))*100), "%", sep = ""))
 ```
 
+Percentage original data removed: 7%
+
 ### 4) Median smoothing
 
 To remove small-scale jitter. We used the smallest possible moving window (3) to retain as much real movement as possible. 
@@ -474,24 +484,47 @@ ggmap(map_z14)+
   theme_void()
 ```
 
-Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so from now on will transform the cleaned lat/lon into utm when needed.
+Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data for this calculation
 
 ```{r}
+# Convert data to spatial and reproject in utm
+points <- data_smooth %>%
+  vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326") %>%
+  # re-project into zone 55S
+  project("EPSG:32755") %>%
+  st_as_sf()
+
+# allocate utm coords
+coords <- st_coordinates(points$geometry)
+
+# format data frame for saving to disk
 data <- data_smooth %>%
+  # select columns to keep
   select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
+  # rename columns
   rename(longitude = location_long,
          latitude = location_lat,
          time_local = datetime,
          time_utc = timestamp) %>%
-  # fix posix time
-  mutate
+  # add utm xy columns 
+  mutate(easting = st_coordinates(points$geometry)[,1],
+         northing = st_coordinates(points$geometry)[,2]) %>%
+  # add cohort metadata
+  left_join(cohort)
 
+# save to disk
 write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 ```
 
+# Survival analysis
+
+Do reinforcers survive better in the short-term than the residents?
+
+
+
 # Movement analysis
 
-Read in clean data
+Read in clean data and calculate basic summary statistics. 
 
 ```{r}
 # Read in cleaned data 
@@ -524,7 +557,14 @@ print(data %>%
   summarise(birddays = sum(days)))
 ```
 
-Birds were tracked for a total of 445 days between June 2022 and January 2024 for a total of 5225 tracking days (sum of each bird's tracking duration). 
+Birds were tracked for a total of 284 days between October 2022 and August 2023 for a total of 3538 tracking days (sum of each bird's tracking duration). 
+
+Wobbles and Star tracked for less than two weeks and excluded from further analyses. 
+
+```{r}
+data <- data %>%
+  filter(!id %in% c("Wobbles", "Star"))
+```
 
 ## Day/night
 
@@ -547,7 +587,7 @@ data_sun <- left_join(data, suntime) %>%
 
 # Plot to check - using scattermore to speed up display
 ggplot(data_sun)+
-  geom_scattermore(aes(utm_easting, utm_northing, colour = tod), alpha = 0.6)+
+  geom_scattermore(aes(easting, northing, colour = tod), alpha = 0.6)+
   coord_sf()+
   theme_void()
 
@@ -555,7 +595,7 @@ ggplot(data_sun)+
 data_sun <- data_sun %>%
   # add column for how long past/to sunset
   mutate(suntime = as.numeric(difftime(time_local, sunset, units = "hours"))) %>%
-  # negative suntime values indicate it's the next day - 
+  # negative sun-time values indicate it's the next day - 
   # therefore allocate previous day calendar date as "bird date"
   mutate(date_bird = as_date(ifelse(suntime > 0, date, date - 1)))
 
@@ -579,22 +619,9 @@ How long does it take birds to settle? Distance moved per night over time. Calcu
 Test with one bird, "Fauna". 
 
 ```{r}
-# Convert data to spatial and reproject in utm
-points <- data_night %>%
-  filter(id=="Fauna") %>%
-  vect(geom = c("longitude", "latitude"), crs = "EPSG:4326") %>%
-  # re-project into zone 55S
-  project("EPSG:32755") %>%
-  st_as_sf()
-
-# save coords
-coords <- st_coordinates(points$geometry)
-
 # format as amt and calculate step lengths
-steps <- points %>%
-  # get utm xy columns 
-  mutate(easting = st_coordinates(points$geometry)[,1],
-         northing = st_coordinates(points$geometry)[,2]) %>%
+steps <- data_night %>%
+  filter(id=="Fauna") %>%
   # format as amt track - add columns as needed
   make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird) %>%
   steps(keep_cols = "start")
@@ -610,7 +637,7 @@ hist(summary$daily_dist)
 # plot over time
 ggplot(summary, aes(date_bird, daily_dist))+
   geom_point()+
-  geom_smooth()+
+  geom_smooth(method = "lm")+
   theme_void()
 ```
 
@@ -640,8 +667,10 @@ for(i in 1:length(birds)){
     # get utm xy columns 
     mutate(easting = st_coordinates(points$geometry)[,1],
          northing = st_coordinates(points$geometry)[,2]) %>%
-    # format as amt track - add columns as needed
-    make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird) %>%
+    # format as amt track 
+    make_track(.x = easting, .y = northing, .t = time_local, id = id, 
+               # add additional columns as needed
+               date_bird = date_bird) %>%
     steps(keep_cols = "start")
 
   # summarise per bird date
@@ -661,7 +690,7 @@ for(i in 1:length(birds)){
 write.csv(distance_daily, "data/daily_distance_moved.csv", row.names = FALSE)
 ```
 
-Plot distance moved as a density plot and movement over time, per bird and per cohort. 
+Plot distance moved as a density plot and movement over time, per bird.
 
 ```{r}
 # plot histogram
@@ -675,11 +704,79 @@ ggplot(distance_daily)+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
   theme(legend.position = "none")+
   xlim(0,7000)+
-  scale_y_discrete(expand = expansion(add = c(0, 2)))
-
-# add cohort information
-
-# plot change over time by bird
-
+  scale_y_discrete(expand = expansion(add = c(0, 2)))+
+  xlab("Distance moved daily (m)") + 
+  theme(axis.title.y=element_blank())
 ```
 
+Compare cohorts average daily movement. 
+
+```{r}
+# filter to establishment period
+distance_daily2 <- distance_daily %>%
+  # add metadata
+  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date_bird - start_date))
+  # filter to establishment period
+  filter(elapsed < 100)
+
+# calculate cohort means
+summary2 <- distance_daily2 %>%
+  group_by(cohort, elapsed) %>%
+  summarise(mean_daily_dist = mean(daily_dist))
+
+# plot distance moved by cohort during establishment
+ggplot(summary2)+
+  geom_path(aes(elapsed, mean_daily_dist, colour = cohort))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Mean daily distance moved (m)")
+```
+
+Interesting. I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release. 
+
+Is there a difference between residents and reinforcers in their change in movement over time? 
+
+```{r}
+# limit cohort daily means to 55 days (minimum period for reinforcers)
+cohort_establishment <- distance_daily2 %>%
+  filter(elapsed < 56)
+
+# plot movement
+ggplot(cohort_establishment)+
+  geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Daily distance moved (m)")
+
+# another way to visualise (group means)
+ggplot(cohort_establishment, 
+       aes(elapsed, daily_dist, color = cohort, group = interaction(cohort, id))) +
+  geom_line(alpha = 0.5) +
+  stat_summary(fun = mean, geom = "line", aes(group = cohort), linewidth = 1.2) +
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Daily distance moved (m)")
+
+# distribution of movement data
+hist(cohort_establishment$daily_dist)
+
+ggqqplot(cohort_establishment$daily_dist)
+
+# correct left skew
+cohort_establishment <- cohort_establishment %>%
+  mutate(dist_sqrt = sqrt(daily_dist))
+
+hist(cohort_establishment$dist_sqrt)
+
+ggqqplot(cohort_establishment$dist_sqrt)
+
+# test whether establishment differs between the groups
+m1 <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = cohort_establishment)
+summary(m1)
+anova(m1)
+```
+
+We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
