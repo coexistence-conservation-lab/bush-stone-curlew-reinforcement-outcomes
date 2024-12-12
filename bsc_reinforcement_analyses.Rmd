@@ -7,7 +7,7 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
@@ -577,7 +577,7 @@ So reinforcers are slightly more likely to survive, however this effect is not s
 
 # Movement analysis
 
-Read in clean data and calculate basic summary statistics. 
+Read in clean data.
 
 ```{r}
 # Read in cleaned data 
@@ -595,7 +595,11 @@ ggmap(map_z14)+
   geom_path(data=data, aes(longitude, latitude, colour = id), alpha = .7)+
   scale_colour_viridis_d()+
   theme_void()
+```
 
+Calculate basic summary statistics. 
+
+```{r}
 # Summary statistic: number of tracked days
 length(unique(data$date))
 
@@ -674,6 +678,9 @@ Distance moved per night over time. Calculation is done per bird per day (bird d
 Test with one bird, "Fauna". 
 
 ```{r}
+# read in night data
+data_night <- read.csv("data/data_clean_night.csv")
+
 # format as amt and calculate step lengths
 steps <- data_night %>%
   filter(id=="Fauna") %>%
@@ -838,7 +845,47 @@ We found a significant effects of cohort, elapsed time, and the interaction of t
 
 ## Release site fidelity
 
-How far did they move from the release location? 
+How far did they move from the release location? Based on daily roost distance from release location.
+
+First calculate roost locations.
+
+```{r}
+# read in day data
+data_day <- read.csv("data/data_clean_day.csv")
+
+# locate kmeans centers per bird per day
+birds <- unique(data_day$id)
+days <- unique(data_day$date)
+
+clusters <- data.frame()
+
+for (i in 1:length(birds)){
+  for (j in 1:length(days)){
+    subset <- subset(data_day, id == birds[i] & date == days[j],
+                    select= c(easting, northing))
+      if (length(subset$easting)<4){
+       next
+      }
+    kmean <- kmeans(subset, centers=2) # 2 centers to allow for secondary roost site
+    out <- as.data.frame(cbind(kmean$centers, npoints = kmean$size)) %>%
+      mutate(id = birds[i], date = days[j])
+    clusters <- rbind(clusters, out)
+  }
+  print(paste("Finished calculation for ", birds[i], sep = ""))
+  }
+
+# characteristics of roost data
+hist(clusters$npoints)
+
+summary(clusters$npoints)
+
+# remove clusters with insufficient points to characterise as a roost
+roosts <- subset(clusters, npoints>15)
+
+# thin data to remove synonymous roosts
+
+```
+
 
 ```{r}
 # release coords
