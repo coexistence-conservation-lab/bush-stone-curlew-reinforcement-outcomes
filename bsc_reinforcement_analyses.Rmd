@@ -521,7 +521,9 @@ write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 
 # Survival analysis
 
-Do reinforcers survive better in the short-term than the residents?
+Do reinforcers survive better than the residents? 
+
+This is hard to answer because not tracked as long and some birds moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
 
 Start by looking at the overall survival probabilities for all birds.
 
@@ -541,13 +543,23 @@ km <- with(surv_data, Surv(time, status))
 kmfit <- survfit(Surv(time, status) ~ 1, data = surv_data)
 
 # Estimated survival probabilities
-summary(kmfit, times = c(1, 10, 30, 100, 365))
+summary(kmfit, times = c(1, 10, 30, 54, 100, 365))
 
 # plot
 autoplot(kmfit)
+```
 
+The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
+
+The probability of survival to 54 days (the study period) is 91% (upper CI = 100%, lower CI = 83%).
+
+Now compare cohorts
+
+```{r}
 # Fit a survival model by cohort
 kmfit_cohort <- survfit(Surv(time, status) ~ cohort, data = surv_data)
+
+summary(kmfit_cohort, times = c(1,30,54))
 
 # plot
 autoplot(kmfit_cohort)
@@ -558,14 +570,11 @@ summary(cox)
 autoplot(survfit(cox))
 ```
 
-The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
+The probability of survival to 54 days for residents is 87% (upper CI = 79%, lower CI = 71%). 
 
-Now compare cohorts. 
+The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
 
-```{r}
-
-```
-
+So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.961). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
 
 # Movement analysis
 
