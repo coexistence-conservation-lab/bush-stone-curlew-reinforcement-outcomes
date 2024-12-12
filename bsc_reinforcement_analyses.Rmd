@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(atlastools, beepr, janitor, ggmap, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, janitor, ggmap, ggridges, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -474,11 +474,11 @@ ggmap(map_z14)+
   theme_void()
 ```
 
-Save data - dropping unneeded columns to save space. 
+Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so from now on will transform the cleaned lat/lon into utm when needed.
 
 ```{r}
 data <- data_smooth %>%
-  select(c("id", "datetime", "timestamp", "location_long", "location_lat", "utm_easting", "utm_northing", "utm_zone", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
+  select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
   rename(longitude = location_long,
          latitude = location_lat,
          time_local = datetime,
@@ -502,8 +502,13 @@ data <- read.csv("data/data_cleaned.csv") %>%
          time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
                                  tz = "UTC")) %>%
   # Add date
-  mutate(date = as_date(time_local, tz = "Australia/Melbourne")) %>%
-  relocate(date, .after = time_local)
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
+
+# Plot cleaned data to check
+ggmap(map_z14)+
+  geom_path(data=data, aes(longitude, latitude, colour = id), alpha = .7)+
+  scale_colour_viridis_d()+
+  theme_void()
 
 # Summary statistic: number of tracked days
 length(unique(data$date))
@@ -547,9 +552,12 @@ ggplot(data_sun)+
   theme_void()
 
 # Add "bird date" 
-temp <- data_sun %>%
-  mutate(suntime = difftime(time_local, as.POSIXct(sunset, format="%H:%M:%S"),
-         units = "hours"))
+data_sun <- data_sun %>%
+  # add column for how long past/to sunset
+  mutate(suntime = as.numeric(difftime(time_local, sunset, units = "hours"))) %>%
+  # negative suntime values indicate it's the next day - 
+  # therefore allocate previous day calendar date as "bird date"
+  mutate(date_bird = as_date(ifelse(suntime > 0, date, date - 1)))
 
 # Save day data
 data_day <- data_sun %>%
@@ -558,56 +566,120 @@ data_day <- data_sun %>%
 write.csv(data_day, "data/data_clean_day.csv", row.names = FALSE)
 
 # Save night data
-data_night <- data_sun
+data_night <- data_sun %>%
+  filter(tod == "night")
 
-write.csv(data_night, "Processed/data_clean_night.csv", row.names = FALSE)
+write.csv(data_night, "data/data_clean_night.csv", row.names = FALSE)
 ```
 
 ## Acclimation period
 
-How long does it take birds to settle? Distance moved per day over time. 
+How long does it take birds to settle? Distance moved per night over time. Calculation is done per bird per day (bird date).
 
-Attemp with amt
+Test with one bird, "Fauna". 
 
 ```{r}
-# Make amt format tracks
-track <- data %>%
-  na.omit() %>%
-  make_track(.x = utm_easting, .y = utm_northing, .t = time_local, id = id)
+# Convert data to spatial and reproject in utm
+points <- data_night %>%
+  filter(id=="Fauna") %>%
+  vect(geom = c("longitude", "latitude"), crs = "EPSG:4326") %>%
+  # re-project into zone 55S
+  project("EPSG:32755") %>%
+  st_as_sf()
 
-# add step length and date
-track <- track %>%
-  mutate(step = step_lengths(track),
-         date = as.Date(t_))
+# save coords
+coords <- st_coordinates(points$geometry)
 
-# plot step length on map to see if it makes sense - testing with Marmalade
-ggplot()+
-  geom_path(data = filter(track, id == "Marmalade"), aes(x_, y_, colour = step))+
-  scale_colour_viridis_c()+
-  coord_sf()+
+# format as amt and calculate step lengths
+steps <- points %>%
+  # get utm xy columns 
+  mutate(easting = st_coordinates(points$geometry)[,1],
+         northing = st_coordinates(points$geometry)[,2]) %>%
+  # format as amt track - add columns as needed
+  make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird) %>%
+  steps(keep_cols = "start")
+
+# summarise per bird date
+summary <- steps %>%
+  group_by(date_bird) %>%
+  summarise(daily_dist = sum(sl_))
+
+# plot histogram
+hist(summary$daily_dist)
+
+# plot over time
+ggplot(summary, aes(date_bird, daily_dist))+
+  geom_point()+
+  geom_smooth()+
   theme_void()
-
-# Calculate daily distance moved
-move <- track %>%
-  group_by(id, date) %>%
-  summarise(distance = sum(step)/1000)
-
-ggplot(move)+
-  geom_density(aes(distance, fill = id), alpha = 0.6)
 ```
 
-Attempt with movestack - this was slow and annoying
+Apply to all birds.
 
 ```{r}
-# format for use with move package
-data <- data %>%
-  na.omit() 
-  
-movestack<- move(data = data, x = data$utm_easting, y = data$utm_northing, time = data$time_local, animal = data$id, proj = crs("EPSG:32755"))
+# for loop to calculate distance moved per bird date
+birds <- unique(data$id)
 
-data$distance <- unlist(lapply(distance(movestack), c, NA))
+distance_daily <- data.frame()
+
+for(i in 1:length(birds)){
+  # Subset to bird, convert data to spatial and reproject in utm
+    points <- data_night %>%
+    # subset to bird
+    filter(id==birds[i]) %>%
+    vect(geom = c("longitude", "latitude"), crs = "EPSG:4326") %>%
+    # re-project into zone 55S
+    project("EPSG:32755") %>%
+    st_as_sf()
+
+  # save coords
+  coords <- st_coordinates(points$geometry)
+
+  # format as amt and calculate step lengths
+  steps <- points %>%
+    # get utm xy columns 
+    mutate(easting = st_coordinates(points$geometry)[,1],
+         northing = st_coordinates(points$geometry)[,2]) %>%
+    # format as amt track - add columns as needed
+    make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird) %>%
+    steps(keep_cols = "start")
+
+  # summarise per bird date
+  summary <- steps %>%
+    group_by(date_bird) %>%
+    summarise(daily_dist = sum(sl_)) %>%
+    mutate(id = birds[i])
+  
+  # write out
+  distance_daily <- rbind(distance_daily, summary)
+  
+  # alert me
+  print(paste("finished calculation for ", birds[i], sep = ""))
+}
+
+# save output
+write.csv(distance_daily, "data/daily_distance_moved.csv", row.names = FALSE)
 ```
 
-Attempt with terra
+Plot distance moved as a density plot and movement over time, per bird and per cohort. 
 
+```{r}
+# plot histogram
+hist(distance_daily$daily_dist)
+
+# plot density by bird
+ggplot(distance_daily)+
+  geom_density_ridges(aes(daily_dist, id, fill = id), alpha = 0.7)+
+  scale_fill_viridis_d()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(legend.position = "none")+
+  xlim(0,7000)+
+  scale_y_discrete(expand = expansion(add = c(0, 2)))
+
+# add cohort information
+
+# plot change over time by bird
+
+```
 
