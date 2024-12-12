@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(atlastools, beepr, janitor, ggmap, move, sf, terra, tidyterra, tidyverse)
+pacman::p_load(atlastools, beepr, janitor, ggmap, move, scattermore, sf, suncalc, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -500,8 +500,10 @@ data <- read.csv("data/data_cleaned.csv") %>%
   mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
                                  tz = "Australia/Melbourne"),
          time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "UTC"),
-         date = as.Date(time_local))
+                                 tz = "UTC")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne")) %>%
+  relocate(date, .after = time_local)
 
 # Summary statistic: number of tracked days
 length(unique(data$date))
@@ -521,12 +523,45 @@ Birds were tracked for a total of 445 days between June 2022 and January 2024 fo
 
 ## Day/night
 
-Rather than splitting data on calendar days we want to split the data by night (across midnight) given they are nocturnal. We use the sunrise/sunset time to add bird date to the data. 
+Rather than splitting data on calendar days (because they are nocturnal and movement continues over midnight) we want to split the data by diurnal and nocturnal movement. We use the sunrise/sunset time (from suncalc) to add bird date to the data. This also provides additional filtering, because jitter while the bird is stationary at its roost overinflates movement estimates, so counting only noctunal movement gives a better estimate of real movement. Additionally, we add "bird date" to the data, a 24-hour period commencing at sunset (a better indication of a "day" from the bird's perspective than calendar day), so that movements over a night (crossing midnight) can be allocated to the correct grouping. 
 
 ```{r}
+# Calculate if time is pre/post dawn/dusk
+suntime <- getSunlightTimes(date = unique(data$date),
+                            lat = -37.90,
+                            lon = 144.43,
+                            keep = c("sunrise", "sunset"),
+                            tz = "Australia/Melbourne") %>%
+  subset(select = -c(lat, lon)) 
 
+# Append to data frame
+data_sun <- left_join(data, suntime) %>%
+  mutate(tod = ifelse(time_local>sunrise & time_local<sunset, "day", "night")) %>%
+  relocate(time_local, .after = tod) %>%
+  na.omit()
+
+# Plot to check - using scattermore to speed up display
+ggplot(data_sun)+
+  geom_scattermore(aes(utm_easting, utm_northing, colour = tod), alpha = 0.6)+
+  coord_sf()+
+  theme_void()
+
+# Add "bird date" 
+temp <- data_sun %>%
+  mutate(suntime = difftime(time_local, as.POSIXct(sunset, format="%H:%M:%S"),
+         units = "hours"))
+
+# Save day data
+data_day <- data_sun %>%
+  filter(tod == "day")
+
+write.csv(data_day, "data/data_clean_day.csv", row.names = FALSE)
+
+# Save night data
+data_night <- data_sun
+
+write.csv(data_night, "Processed/data_clean_night.csv", row.names = FALSE)
 ```
-
 
 ## Acclimation period
 
