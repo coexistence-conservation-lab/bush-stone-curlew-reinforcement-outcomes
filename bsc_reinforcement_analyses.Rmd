@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -843,10 +843,9 @@ anova(m1)
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
 
-## Release site fidelity
+## Roost establishment
 
-How far did they move from the release location? Based on daily roost distance from release location.
-
+Look at the same idea as the previous section (a metric of establishment) but with diurnal roost movement rather than nightly distanced moved. 
 First calculate roost locations.
 
 ```{r}
@@ -920,11 +919,172 @@ ggplot()+
   scale_colour_viridis_d()+
   theme_bw()
 
+# plot for a single bird with date as colour
+ggplot(data = filter(roosts, id == "Aurora"))+
+  geom_point(aes(easting, northing, size = npoints, colour = as.Date(date)))+
+  geom_path(aes(easting, northing, group = id), alpha = 0.3)+
+  coord_sf()+
+  scale_colour_viridis_c()+
+  theme_bw()
+
+# save daily roost locations
+write.csv(roosts, "data/daily_roost_location.csv", row.names = FALSE)
 ```
 
+How far between consecutive roosts? 
 
 ```{r}
-# release coords
-release  <- c(274423.45, 5801912.85) #(-37.902374, 144.434323)
+# read in roost locations, format as spatial
+roosts <- read.csv("data/daily_roost_location.csv") %>%
+  select(!c("dist", "npoints")) %>%
+  vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
+  st_as_sf()
+
+# calculate distance between successive roosts per bird
+birds <- unique(roosts$id)
+
+distance_roosts <- data.frame()
+
+for(i in 1:length(birds)){
+  
+  # subset to individual
+  points <- filter(roosts, id==birds[i]) %>%
+    # ensure arranged by date
+    arrange(date) %>%
+    # date as posix
+    mutate(date = as.POSIXct(date, format = "%Y-%m-%d")) %>%
+    #add lag column for geometry comparison
+    mutate(previous = lag(geometry))
+  
+  # allocate the release location as the first location
+  release <- st_sfc(st_point(c(274423.45, 5801912.85) ), crs = 32755) %>%
+    st_as_sf()
+  
+  points$previous[1] <- release$x
+  
+  # calculate the distance between successive points
+  out <- points %>%
+    mutate(distance_previous = 
+             as.numeric(st_distance(points$geometry, points$previous, by_element = TRUE))) %>%
+    select(!"previous")
+  
+  # write out
+  distance_roosts <- rbind(distance_roosts, out)
+}
+
+# hist
+hist(distance_roosts$distance_previous)
+
+# transform to latlon for plotting
+distance_roosts_latlon <- distance_roosts %>%
+  vect() %>%
+  project("EPSG:4326") %>%
+  st_as_sf() %>%
+  # drop the very far nutmeg outlier roost and return
+  filter(distance_previous <2000)
+
+# plot roosts with colour as distance from previous
+ggplot()+
+  geom_sf(data = distance_roosts_latlon, aes(colour = distance_previous))+
+  scale_colour_viridis_c()+ 
+  theme_void()
+
+# and same plot on map
+ggmap(map_z15)+
+  geom_sf(data = distance_roosts_latlon, aes(colour = distance_previous), inherit.aes = FALSE)+
+  scale_colour_viridis_c()
+
+# write to file
+write.csv(distance_roosts_latlon, "data/distance_between_daily_roosts")
 ```
 
+There is a day Nutmeg seems to have spent 3km away from their previous roost. IS that true? Investigate this outlier.
+
+```{r}
+# Read in cleaned data 
+nutmeg <- read.csv("data/data_cleaned.csv") %>%
+  # select only Nutmeg
+  filter(id == "Nutmeg") %>%
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne"),
+         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "UTC")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne")) 
+
+# Plot
+ggmap(map_z13)+
+  geom_point(data=nutmeg, aes(longitude, latitude, colour = date), alpha = 0.8)+
+  scale_colour_viridis_c()+
+  geom_path(data=nutmeg, aes(longitude, latitude), colour = "white", alpha = 0.4)+
+  theme_void()
+```
+
+Yep that looks true! On 5-11-23, Nutmeg goes on a flight to the west of the sanctuary, stays over the day near the quarry, then returns to the sanctuary the next day. 
+
+## Release site fidelity
+
+How far did they move from the release location? Based on daily roost distance from release location.
+
+Calculate distance from daily roost to release location. 
+
+Release location utm:(274423.45, 5801912.85) 
+Release location lat/lon:(-37.902374, 144.434323)
+
+```{r}
+# read in roost locations, format as spatial
+roosts <- read.csv("data/daily_roost_location.csv") %>%
+  select(!c("dist", "npoints")) %>%
+  vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
+  st_as_sf()
+
+# release coords as spatial
+release  <- st_sfc(st_point(c(274423.45, 5801912.85) ), crs = 32755)
+
+# calculate distance between roosts and release site
+dist <- roosts %>%
+  mutate(dist_release = as.numeric(st_distance(release, roosts))) %>%
+  # keep max distance per day
+  group_by(date, id) %>%
+  filter(dist_release == max(dist_release)) %>%
+  ungroup() %>%
+  # add cohort information
+  left_join(select(metadata, c("cohort", "id"))) %>%
+  # format date as a date
+  mutate(date = as_date(date)) %>%
+  # arrange by date
+  arrange(date) %>%
+  # remove the extreme value for nutmeg, visual error
+  filter(dist_release < 2000)
+
+# plot distance over time
+ggplot(dist)+
+  geom_path(aes(date, dist_release, colour = id))+
+  scale_colour_viridis_d()+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Roost distance from release site (m)")+
+  # add bar for arrival of new birds
+  geom_vline(xintercept = as_date("2023-06-07"), linetype = "dashed")
+
+# convert to latlon and back to data frame
+dist_latlon <- dist %>%
+  vect() %>%
+  project("EPSG:4326") %>%
+  st_as_sf() %>%
+  st_coordinates() %>%
+  as.data.frame() %>%
+  cbind(st_drop_geometry(dist), .) %>%
+  clean_names() %>%
+  arrange(date, id)
+
+# plot roost location over time
+ggmap(map_z15)+
+  geom_point(data = dist_latlon, aes(x, y, colour = date), alpha = 0.7)+
+  scale_colour_viridis_c()+
+  theme_void()
+```
+
+Interestingly we can see the original residents had split into two roost areas (zone 2 and central woodland). There was some swapping between these from January to April. In June the residents came together into a single cluster, until the reinforcers arrived and caused an upset in the stability. They then alternate between the central woodland and the eastern boundary (except for Aurora who goes back to zone 2 by themself).
