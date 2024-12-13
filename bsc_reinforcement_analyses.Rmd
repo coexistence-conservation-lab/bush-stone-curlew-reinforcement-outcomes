@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, suncalc, survival, survminer, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -861,28 +861,64 @@ clusters <- data.frame()
 
 for (i in 1:length(birds)){
   for (j in 1:length(days)){
+    
+    #subset by bird and date
     subset <- subset(data_day, id == birds[i] & date == days[j],
                     select= c(easting, northing))
-      if (length(subset$easting)<4){
-       next
-      }
+    # skip days where not enough points
+      if (length(subset$easting)<4){next}
+    
+    # find kmean centers
     kmean <- kmeans(subset, centers=2) # 2 centers to allow for secondary roost site
+    
+    # calculate distance between centers
+    coords <- kmean[["centers"]] %>%
+    vect(crs = "EPSG:32755") %>%
+    st_as_sf()
+      
+    dist <- as.numeric(st_distance(coords[1,], coords[2,]))
+      
+    
+    # compile data
     out <- as.data.frame(cbind(kmean$centers, npoints = kmean$size)) %>%
-      mutate(id = birds[i], date = days[j])
+      mutate(id = birds[i], date = days[j], dist = dist)
+    
+    # remove the smaller of a pair of roosts, only when distance between is < 30
+    
+    if(max(out$dist)<=30) {
+      out <- out %>% 
+        filter(npoints == max(npoints))
+    }
+    
     clusters <- rbind(clusters, out)
+    
   }
   print(paste("Finished calculation for ", birds[i], sep = ""))
-  }
+}
 
-# characteristics of roost data
+# characteristics of cluster data
 hist(clusters$npoints)
-
 summary(clusters$npoints)
 
-# remove clusters with insufficient points to characterise as a roost
-roosts <- subset(clusters, npoints>15)
+# plot clusters by number of points
+ggplot()+
+  geom_point(data = clusters, aes(easting, northing, size = npoints, colour = id))+
+  geom_path(data = clusters, aes(easting, northing, group = id), alpha = 0.3)+
+  coord_sf()+
+  scale_colour_viridis_d()+
+  theme_bw()
 
-# thin data to remove synonymous roosts
+# remove clusters with less than 15 points, insufficient to constitute a roost
+roosts <- clusters %>%
+  filter(npoints > 15)
+
+# plot roosts by number of points
+ggplot()+
+  geom_point(data = roosts, aes(easting, northing, size = npoints, colour = id))+
+  geom_path(data = roosts, aes(easting, northing, group = id), alpha = 0.3)+
+  coord_sf()+
+  scale_colour_viridis_d()+
+  theme_bw()
 
 ```
 
