@@ -799,6 +799,8 @@ ggplot(summary2)+
 
 Interesting. I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release. 
 
+### Model 1
+
 Is there a difference between residents and reinforcers in their change in movement over time? 
 
 ```{r}
@@ -846,7 +848,23 @@ We found a significant effects of cohort, elapsed time, and the interaction of t
 ## Roost establishment
 
 Look at the same idea as the previous section (a metric of establishment) but with diurnal roost movement rather than nightly distanced moved. 
-First calculate roost locations.
+
+First calculate roost locations. Test with one bird, Aurora. 
+
+```{r}
+# read in day data
+data_day <- read.csv("data/data_clean_day.csv") %>%
+  filter(id == "Aurora")
+
+# plot density to get an idea of roost locations
+ggmap(map_z15)+
+  geom_density_2d(data = data_day, 
+                  aes(longitude, latitude, group = as.Date(date), colour = as.Date(date)))+
+  scale_colour_viridis_c()+
+  theme_void()
+
+```
+
 
 ```{r}
 # read in day data
