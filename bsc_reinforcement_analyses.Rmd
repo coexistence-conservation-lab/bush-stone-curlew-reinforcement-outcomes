@@ -17,7 +17,6 @@ pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggr
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
 
 # Background map MR zones 1 and 2
-map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
 map_z14 <- get_map(c(144.4380, -37.9000), zoom=14, maptype = "satellite")
 map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
 
@@ -45,7 +44,7 @@ All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela)
 
 High throughput animal tracking data require filtering to remove erroneous points, while maintaining real movement data. We follow the workflow by [Gupte et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.13610), that is:
 
-1) temporal filtering (mostly done on Movebank by setting deployment period)
+1) temporal filtering
 2) filtering by quality covariates
 3) filtering biologically unrealistic movement
 4) median smoothing
@@ -116,7 +115,7 @@ ggmap(map_z13)+
 
 There are a handful of massive hdop values (5-15) but the vast majority are =<2. Again the obvious spikes don't have high hdop values. We'll filter to only include hdop <=2. 
 
-Whereas I've found better filtering on the basis of altitude. 
+Next we'll apply filtering on the basis of altitude. 
 
 Incorrect GPS fixes often have incorrect altitude. High altitude was not expected as no birds were undertaking long-distance flight, which is the only time high altitude is possible. All birds were wing-clipped on release and some later moulted and undertook short-distance flight, but not at high altitude. 
 
@@ -487,7 +486,7 @@ ggmap(map_z14)+
   theme_void()
 ```
 
-Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data for this calculation
+Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data when required instead. 
 
 ```{r}
 # Convert data to spatial and reproject in utm
@@ -513,7 +512,7 @@ data <- data_smooth %>%
   mutate(easting = st_coordinates(points$geometry)[,1],
          northing = st_coordinates(points$geometry)[,2]) %>%
   # add cohort metadata
-  left_join(cohort)
+  left_join(select(metadata, c("id","cohort")))
 
 # save to disk
 write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
@@ -614,7 +613,7 @@ print(data %>%
   summarise(birddays = sum(days)))
 ```
 
-Birds were tracked for a total of 284 days between October 2022 and August 2023 for a total of 3538 tracking days (sum of each bird's tracking duration). 
+Birds were tracked for a total of 284 days between October 2022 and August 2023 for a total of 3533 tracking days (sum of each bird's tracking duration). 
 
 Wobbles and Star tracked for less than two weeks and excluded from further analyses. 
 
@@ -671,7 +670,7 @@ write.csv(data_night, "data/data_clean_night.csv", row.names = FALSE)
 
 ## Distance moved
 
-How long does it take birds to settle? Do acclimation periods differ between cohort.
+How long does it take birds to settle? Do acclimation periods differ between cohorts?
 
 Distance moved per night over time. Calculation is done per bird per day (bird date).
 
@@ -679,7 +678,9 @@ Test with one bird, "Fauna".
 
 ```{r}
 # read in night data
-data_night <- read.csv("data/data_clean_night.csv")
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # format time as posixct
+  mutate(time_local = as.POSIXct(time_local))
 
 # format as amt and calculate step lengths
 steps <- data_night %>%
@@ -707,7 +708,7 @@ Apply to all birds.
 
 ```{r}
 # for loop to calculate distance moved per bird date
-birds <- unique(data$id)
+birds <- unique(data_night$id)
 
 distance_daily <- data.frame()
 
@@ -771,25 +772,35 @@ ggplot(distance_daily)+
   theme(axis.title.y=element_blank())
 ```
 
-Compare cohorts average daily movement. 
+### Model 1a
+
+Is there a difference between residents and reinforcers in their change in movement over time? 
+
+Visualise daily movement to 100 days.
 
 ```{r}
+# read in data
+distance_daily <- read.csv("data/daily_distance_moved.csv")
+
 # filter to establishment period
-distance_daily2 <- distance_daily %>%
+establishment_100 <- distance_daily %>%
   # add metadata
   left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date_bird = as_date(date_bird),
+         start_date = as_date(start_date)) %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date_bird - start_date)) %>%
   # filter to establishment period
   filter(elapsed < 100)
 
 # calculate cohort means
-summary2 <- distance_daily2 %>%
+summary <- establishment_100 %>%
   group_by(cohort, elapsed) %>%
   summarise(mean_daily_dist = mean(daily_dist))
 
 # plot distance moved by cohort during establishment
-ggplot(summary2)+
+ggplot(summary)+
   geom_path(aes(elapsed, mean_daily_dist, colour = cohort))+
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
@@ -797,84 +808,95 @@ ggplot(summary2)+
   ylab("Mean daily distance moved (m)")
 ```
 
-Interesting. I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release. 
+I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release. 
 
-### Model 1
-
-Is there a difference between residents and reinforcers in their change in movement over time? 
+For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
 
 ```{r}
 # limit cohort daily means to 55 days (minimum period for reinforcers)
-cohort_establishment <- distance_daily2 %>%
+establishment_55 <- establishment_100 %>%
   filter(elapsed < 56)
 
-# plot movement
-ggplot(cohort_establishment)+
+# distribution of movement data
+hist(establishment_55$daily_dist)
+ggqqplot(establishment_55$daily_dist)
+
+# correct left skew
+establishment_55 <- establishment_55 %>%
+  mutate(dist_sqrt = sqrt(daily_dist))
+
+hist(establishment_55$dist_sqrt)
+ggqqplot(establishment_55$dist_sqrt)
+
+# plot difference between cohorts (without time)
+ggplot(establishment_55)+
+  geom_boxplot(aes(cohort, daily_dist))+
+  theme_bw()+
+  xlab("Cohort") + 
+  ylab("Distance travelled per night (m)")
+
+# plot difference over time
+ggplot(establishment_55)+
   geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
   theme_minimal() +
   xlab("Days post-release") + 
   ylab("Daily distance moved (m)")
 
-# another way to visualise (group means)
-ggplot(cohort_establishment, 
-       aes(elapsed, daily_dist, color = cohort, group = interaction(cohort, id))) +
-  geom_line(alpha = 0.5) +
-  stat_summary(fun = mean, geom = "line", aes(group = cohort), linewidth = 1.2) +
-  theme_minimal() +
-  xlab("Days post-release") + 
-  ylab("Daily distance moved (m)")
-
-# distribution of movement data
-hist(cohort_establishment$daily_dist)
-
-ggqqplot(cohort_establishment$daily_dist)
-
-# correct left skew
-cohort_establishment <- cohort_establishment %>%
-  mutate(dist_sqrt = sqrt(daily_dist))
-
-hist(cohort_establishment$dist_sqrt)
-
-ggqqplot(cohort_establishment$dist_sqrt)
-
 # test whether establishment differs between the groups
-m1 <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = cohort_establishment)
-summary(m1)
-anova(m1)
+m1a <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m1a)
+anova(m1a)
 ```
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
+
+### Model 1b
+
+Does the addition of the reinforcing cohort change the movement of the residents?
+
+
 
 ## Roost establishment
 
 Look at the same idea as the previous section (a metric of establishment) but with diurnal roost movement rather than nightly distanced moved. 
 
-First calculate roost locations. Test with one bird, Aurora. 
-
-```{r}
-# read in day data
-data_day <- read.csv("data/data_clean_day.csv") %>%
-  filter(id == "Aurora")
-
-# plot density to get an idea of roost locations
-ggmap(map_z15)+
-  geom_density_2d(data = data_day, 
-                  aes(longitude, latitude, group = as.Date(date), colour = as.Date(date)))+
-  scale_colour_viridis_c()+
-  theme_void()
-
-```
-
+First calculate roost locations. Test with one bird.
 
 ```{r}
 # read in day data
 data_day <- read.csv("data/data_clean_day.csv")
 
-# locate kmeans centers per bird per day
+# filter to test bird
+test <- data_day %>%
+  filter(id == "Aurora")
+
+# plot roosts coloured by date
+ggmap(map_z15)+
+  geom_density2d(data=test, aes(longitude, latitude, colour = date), inherit.aes = FALSE)+
+  theme_void()+
+  scale_colour_viridis_d()+
+  theme(legend.position = "none")
+
+# plot a series of dates to see if multiple roosts occur
+dates <- seq(as.Date("2023-01-01"), as.Date("2023-01-12"), "days")
+span <- filter(test, date %in% dates)
+
+ggmap(map_z15)+
+  geom_density2d(data=test, aes(longitude, latitude), colour = "yellow", inherit.aes = FALSE)+
+  theme_void()+
+  facet_wrap(~date)
+```
+
+On visual inspection, the vast majority of dates have a single roost. 
+
+Approximate roosts positions using kmeans. Apply to all birds
+
+```{r}
+# locate kmeans center for a roost per bird per day
 birds <- unique(data_day$id)
 days <- unique(data_day$date)
 
-clusters <- data.frame()
+roosts <- data.frame()
 
 for (i in 1:length(birds)){
   for (j in 1:length(days)){
@@ -886,64 +908,43 @@ for (i in 1:length(birds)){
       if (length(subset$easting)<4){next}
     
     # find kmean centers
-    kmean <- kmeans(subset, centers=2) # 2 centers to allow for secondary roost site
-    
-    # calculate distance between centers
-    coords <- kmean[["centers"]] %>%
-    vect(crs = "EPSG:32755") %>%
-    st_as_sf()
-      
-    dist <- as.numeric(st_distance(coords[1,], coords[2,]))
-      
+    kmean <- kmeans(subset, centers=1)
     
     # compile data
     out <- as.data.frame(cbind(kmean$centers, npoints = kmean$size)) %>%
-      mutate(id = birds[i], date = days[j], dist = dist)
+      mutate(id = birds[i], date = days[j])
     
-    # remove the smaller of a pair of roosts, only when distance between is < 30
-    
-    if(max(out$dist)<=30) {
-      out <- out %>% 
-        filter(npoints == max(npoints))
-    }
-    
-    clusters <- rbind(clusters, out)
+    roosts <- rbind(roosts, out)
     
   }
   print(paste("Finished calculation for ", birds[i], sep = ""))
 }
 
 # characteristics of cluster data
-hist(clusters$npoints)
-summary(clusters$npoints)
-
-# plot clusters by number of points
-ggplot()+
-  geom_point(data = clusters, aes(easting, northing, size = npoints, colour = id))+
-  geom_path(data = clusters, aes(easting, northing, group = id), alpha = 0.3)+
-  coord_sf()+
-  scale_colour_viridis_d()+
-  theme_bw()
-
-# remove clusters with less than 15 points, insufficient to constitute a roost
-roosts <- clusters %>%
-  filter(npoints > 15)
+hist(roosts$npoints)
+summary(roosts$npoints)
 
 # plot roosts by number of points
-ggplot()+
-  geom_point(data = roosts, aes(easting, northing, size = npoints, colour = id))+
-  geom_path(data = roosts, aes(easting, northing, group = id), alpha = 0.3)+
+ggplot(roosts)+
+  geom_point(aes(easting, northing, size = npoints, colour = id))+
+  geom_path(aes(easting, northing, group = id), alpha = 0.3)+
   coord_sf()+
   scale_colour_viridis_d()+
   theme_bw()
 
 # plot for a single bird with date as colour
-ggplot(data = filter(roosts, id == "Aurora"))+
+ggplot(data = filter(roosts, id == "Marmalade"))+
   geom_point(aes(easting, northing, size = npoints, colour = as.Date(date)))+
   geom_path(aes(easting, northing, group = id), alpha = 0.3)+
   coord_sf()+
   scale_colour_viridis_c()+
-  theme_bw()
+  theme_bw()+
+  theme(axis.line=element_blank(),
+      axis.text.x=element_blank(),
+      axis.text.y=element_blank(),
+      axis.ticks=element_blank(),
+      axis.title.x=element_blank(),
+      axis.title.y=element_blank())
 
 # save daily roost locations
 write.csv(roosts, "data/daily_roost_location.csv", row.names = FALSE)
@@ -954,23 +955,22 @@ How far between consecutive roosts?
 ```{r}
 # read in roost locations, format as spatial
 roosts <- read.csv("data/daily_roost_location.csv") %>%
-  select(!c("dist", "npoints")) %>%
+  select(!"npoints") %>%
   vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
   st_as_sf()
 
 # calculate distance between successive roosts per bird
 birds <- unique(roosts$id)
-
 distance_roosts <- data.frame()
 
 for(i in 1:length(birds)){
   
   # subset to individual
   points <- filter(roosts, id==birds[i]) %>%
-    # ensure arranged by date
-    arrange(date) %>%
     # date as posix
     mutate(date = as.POSIXct(date, format = "%Y-%m-%d")) %>%
+    # ensure arranged by date
+    arrange(date) %>%
     #add lag column for geometry comparison
     mutate(previous = lag(geometry))
   
@@ -993,13 +993,12 @@ for(i in 1:length(birds)){
 # hist
 hist(distance_roosts$distance_previous)
 
-# transform to latlon for plotting
+# transform to latlon
 distance_roosts_latlon <- distance_roosts %>%
   vect() %>%
   project("EPSG:4326") %>%
   st_as_sf() %>%
-  # drop the very far nutmeg outlier roost and return
-  filter(distance_previous <2000)
+  mutate(date = as_date(date))
 
 # plot roosts with colour as distance from previous
 ggplot()+
@@ -1007,13 +1006,11 @@ ggplot()+
   scale_colour_viridis_c()+ 
   theme_void()
 
-# and same plot on map
+# plot roosts with colour as date
 ggmap(map_z15)+
-  geom_sf(data = distance_roosts_latlon, aes(colour = distance_previous), inherit.aes = FALSE)+
-  scale_colour_viridis_c()
-
-# write to file
-write.csv(distance_roosts_latlon, "data/distance_between_daily_roosts")
+  geom_sf(data = distance_roosts_latlon, aes(colour = date), inherit.aes = FALSE)+
+  scale_colour_viridis_c(trans = "date")+
+  theme_void()
 ```
 
 There is a day Nutmeg seems to have spent 3km away from their previous roost. IS that true? Investigate this outlier.
@@ -1041,6 +1038,145 @@ ggmap(map_z13)+
 
 Yep that looks true! On 5-11-23, Nutmeg goes on a flight to the west of the sanctuary, stays over the day near the quarry, then returns to the sanctuary the next day. 
 
+Points outside of fence?
+
+```{r}
+# Convert df to points
+points <- vect(distance_roosts_latlon)
+
+# Find points outside polygons
+outside <- points[!relate(points, mtr, "intersects")] %>%
+  as.data.frame(geom = "XY")
+  
+# Plot points outside polygon 
+ggmap(map_z15)+
+  geom_point(data=outside, aes(x, y, colour = id), alpha = 0.7, size = 3)+
+  geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
+  scale_colour_viridis_d()+
+  theme_void()
+```
+
+One real roost outside (Nutmeg's adventure as above) and 5 where birds were just roosting close to the fence. This is fine. 
+
+Save output.
+
+```{r}
+# convert geometry to regular columns to save to disk
+distance_roosts2 <- distance_roosts_latlon %>%
+  st_drop_geometry() %>%
+  mutate(longitude = st_coordinates(distance_roosts_latlon$geometry)[,1],
+         latitude = st_coordinates(distance_roosts_latlon$geometry)[,2])
+
+# plot on map without the far nutmeg point
+ggmap(map_z15)+
+  geom_path(data = filter(distance_roosts2, distance_previous<2000),
+          aes(longitude, latitude, group = id), colour = "white", alpha = 0.6, inherit.aes = FALSE)+
+    geom_point(data = filter(distance_roosts2, distance_previous<2000),
+          aes(longitude, latitude, colour = distance_previous), inherit.aes = FALSE)+
+  scale_colour_viridis_c()+
+  theme_void()
+
+# write to file
+write.csv(distance_roosts2, "data/daily_distance_between_roosts.csv", row.names = FALSE)
+```
+
+### Model 2a
+
+Do the cohorts differ in their roost establishment?
+
+Visualise daily movement to 100 days.
+
+```{r}
+# read in data
+distance_roosts <- read.csv("data/daily_distance_between_roosts.csv") %>%
+   # add metadata
+  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date))
+
+# filter to first 100 days
+establishment_100 <- distance_roosts %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # filter to establishment period
+  filter(elapsed < 100)
+
+# calculate cohort means
+summary <- establishment_100 %>%
+  group_by(cohort, elapsed) %>%
+  summarise(mean_distance_previous = mean(distance_previous))
+
+# plot distance moved between roosts by cohort during establishment
+ggplot(summary)+
+  geom_path(aes(elapsed, mean_distance_previous, colour = cohort))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Mean distance moved between roosts per day (m)")
+```
+
+Distance between roosts sites might be the better indication of acclimation than daily distance moved - saw the expected initial high movement followed by settling in. 
+
+For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
+
+```{r}
+# limit cohort daily means to 55 days (minimum period for reinforcers)
+establishment_55 <- establishment_100 %>%
+  filter(elapsed < 56)
+
+# distribution of movement data
+hist(establishment_55$distance_previous)
+ggqqplot(establishment_55$distance_previous)
+
+# correct left skew
+establishment_55 <- establishment_55 %>%
+  mutate(dist_log = log(distance_previous))
+
+hist(establishment_55$dist_log)
+ggqqplot(establishment_55$dist_log)
+
+# plot difference between cohorts (without time)
+ggplot(establishment_55)+
+  geom_boxplot(aes(cohort, dist_log))+
+  theme_bw()+
+  xlab("Cohort") + 
+  ylab("Distance between consecutive roosts (log transformed)")
+
+# plot difference over time
+ggplot(establishment_55)+
+  geom_smooth(aes(elapsed, distance_previous, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Distance between consecutive roosts (m)")
+
+# test whether establishment differs between the groups
+m2a <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m2a)
+anova(m2a)
+```
+
+Settling in was more static in residents than reinforcers, who continued to move more. The resident cohort settled on fixed roosts quickly, whereas the reinforcers alternated between roosting in the central woodland and roosting on the eastern boundary. 
+
+We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more than reinforcers (estimate: -0.01104).
+
+### Model 2b
+
+Does the addition of the reinforcing cohort change the movement of the residents?
+
+```{r}
+# plot distance over time (real dates)
+ggplot(distance_roosts)+
+  geom_path(aes(as_date(date), distance_previous, group = id, colour = cohort))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Distance between roosts (m)") +
+  # add bar for arrival of new birds
+  geom_vline(xintercept = as_date("2023-06-07"), linetype = "dashed")
+```
+
+
 ## Release site fidelity
 
 How far did they move from the release location? Based on daily roost distance from release location.
@@ -1053,7 +1189,7 @@ Release location lat/lon:(-37.902374, 144.434323)
 ```{r}
 # read in roost locations, format as spatial
 roosts <- read.csv("data/daily_roost_location.csv") %>%
-  select(!c("dist", "npoints")) %>%
+  select(!"npoints") %>%
   vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
   st_as_sf()
 
@@ -1073,36 +1209,103 @@ dist <- roosts %>%
   mutate(date = as_date(date)) %>%
   # arrange by date
   arrange(date) %>%
-  # remove the extreme value for nutmeg, visual error
-  filter(dist_release < 2000)
+  # drop geometry
+  st_drop_geometry()
+# save to file
+write.csv(dist, "data/daily_roost_distance_from_release.csv", row.names = FALSE)
+```
 
-# plot distance over time
-ggplot(dist)+
-  geom_path(aes(date, dist_release, colour = id))+
-  scale_colour_viridis_d()+
+### Model 3a
+
+Does release site fidelity differ between the cohorts?
+
+Visualise to 100 days.
+
+```{r}
+dist_release <- read.csv("data/daily_roost_distance_from_release.csv")
+
+# filter to first 100 days
+establishment_100 <- dist_release %>%
+  # add metadata
+  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date)) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # filter to establishment period
+  filter(elapsed < 100)
+
+# calculate cohort means
+summary <- establishment_100 %>%
+  group_by(cohort, elapsed) %>%
+  summarise(mean_distance_release = mean(dist_release))
+
+# plot distance moved between roosts by cohort during establishment
+ggplot(summary)+
+  geom_path(aes(elapsed, mean_distance_release, colour = cohort))+
   theme_bw()+
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
   xlab("Days post-release") + 
-  ylab("Roost distance from release site (m)")+
+  ylab("Mean distance between roost and release location (m)")
+```
+
+The reinforcers did not move as far from the release location as the residents, who moved away and stayed away. 
+
+For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
+
+```{r}
+# limit cohort daily means to 55 days (minimum period for reinforcers)
+establishment_55 <- establishment_100 %>%
+  filter(elapsed < 56)
+
+# plot difference between cohorts (without time)
+ggplot(establishment_55)+
+  geom_boxplot(aes(cohort, dist_release))+
+  theme_bw()+
+  xlab("Cohort") + 
+  ylab("Distance from release site to roost (m)")
+
+# plot cohort mean for daily distance between roosts over time
+ggplot(establishment_55)+
+  geom_smooth(aes(elapsed, dist_release, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Distance from release site to roost (m)")
+
+# distribution of movement data
+hist(establishment_55$dist_release)
+ggqqplot(establishment_55$dist_release)
+
+# correct right skew
+establishment_55 <- establishment_55 %>%
+  mutate(dist_log = log(dist_release))
+
+hist(establishment_55$dist_log)
+ggqqplot(establishment_55$dist_log)
+
+# test whether establishment differs between the groups
+m3a <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
+summary(m3a)
+anova(m3a)
+```
+
+We found a significant effects of elapsed time and the interaction of time and cohort on the daily distance from release site to roosts. However there was no effect of cohort alone. Both cohorts increased their distance from the release site over time, but residents did this faster than reinforcers. 
+
+### Model 3b
+
+Does the addition of the reinforcing cohort change the movement of the residents?
+
+```{r}
+# plot distance over time (real dates)
+ggplot(dist_release)+
+  geom_path(aes(as_date(date), dist_release, group = id, colour = cohort))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Roost distance from release site (m)") +
   # add bar for arrival of new birds
   geom_vline(xintercept = as_date("2023-06-07"), linetype = "dashed")
-
-# convert to latlon and back to data frame
-dist_latlon <- dist %>%
-  vect() %>%
-  project("EPSG:4326") %>%
-  st_as_sf() %>%
-  st_coordinates() %>%
-  as.data.frame() %>%
-  cbind(st_drop_geometry(dist), .) %>%
-  clean_names() %>%
-  arrange(date, id)
-
-# plot roost location over time
-ggmap(map_z15)+
-  geom_point(data = dist_latlon, aes(x, y, colour = date), alpha = 0.7)+
-  scale_colour_viridis_c()+
-  theme_void()
 ```
 
 Interestingly we can see the original residents had split into two roost areas (zone 2 and central woodland). There was some swapping between these from January to April. In June the residents came together into a single cluster, until the reinforcers arrived and caused an upset in the stability. They then alternate between the central woodland and the eastern boundary (except for Aurora who goes back to zone 2 by themself).
