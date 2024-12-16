@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
+pacman::p_load(amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -502,7 +502,7 @@ coords <- st_coordinates(points$geometry)
 # format data frame for saving to disk
 data <- data_smooth %>%
   # select columns to keep
-  select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
+  dplyr::select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
   # rename columns
   rename(longitude = location_long,
          latitude = location_lat,
@@ -512,67 +512,11 @@ data <- data_smooth %>%
   mutate(easting = st_coordinates(points$geometry)[,1],
          northing = st_coordinates(points$geometry)[,2]) %>%
   # add cohort metadata
-  left_join(select(metadata, c("id","cohort")))
+  left_join(dplyr::select(metadata, c("id","cohort")))
 
 # save to disk
 write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 ```
-
-# Survival analysis
-
-Do reinforcers survive better than the residents? 
-
-This is hard to answer because not tracked as long and some birds moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
-
-Start by looking at the overall survival probabilities for all birds.
-
-```{r m6}
-# Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
-surv_data <- metadata %>%
-  # remove columns not needed
-  select(!c(location, abbbs, band, alive, release_year)) %>%
-  # add survival time (persistence) - right censored data
-  mutate(time = end_date - start_date) %>%
-  # add status - whether death occurs
-  mutate(status = ifelse(is.na(mortality), 0, 1))
-
-km <- with(surv_data, Surv(time, status))
-  
-# Fit a basic survival model
-kmfit <- survfit(Surv(time, status) ~ 1, data = surv_data)
-
-# Estimated survival probabilities
-summary(kmfit, times = c(1, 10, 30, 54, 100, 365))
-
-# plot
-autoplot(kmfit)
-```
-
-The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
-
-The probability of survival to 54 days (the study period) is 91% (upper CI = 100%, lower CI = 83%).
-
-Now compare cohorts
-
-```{r}
-# Fit a survival model by cohort
-kmfit_cohort <- survfit(Surv(time, status) ~ cohort, data = surv_data)
-
-summary(kmfit_cohort, times = c(1,30,54))
-
-# plot
-autoplot(kmfit_cohort)
-
-# Fit Cox Model
-cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
-summary(cox)
-```
-
-The probability of survival to 54 days for residents is 87% (upper CI = 79%, lower CI = 71%). 
-
-The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
-
-So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.961). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
 
 # Movement analysis
 
@@ -633,7 +577,7 @@ suntime <- getSunlightTimes(date = unique(data$date),
                             lon = 144.43,
                             keep = c("sunrise", "sunset"),
                             tz = "Australia/Melbourne") %>%
-  subset(select = -c(lat, lon)) 
+  subset(dplyr::select = -c(lat, lon)) 
 
 # Append to data frame
 data_sun <- left_join(data, suntime) %>%
@@ -819,7 +763,7 @@ for (i in 1:length(birds)){
     
     #subset by bird and date
     subset <- subset(data_day, id == birds[i] & date == days[j],
-                    select= c(easting, northing))
+                    dplyr::select= c(easting, northing))
     # skip days where not enough points
       if (length(subset$easting)<4){next}
     
@@ -871,7 +815,7 @@ How far between consecutive roosts?
 ```{r}
 # read in roost locations, format as spatial
 roosts <- read.csv("data/daily_roost_location.csv") %>%
-  select(!"npoints") %>%
+  dplyr::select(!"npoints") %>%
   vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
   st_as_sf()
 
@@ -900,7 +844,7 @@ for(i in 1:length(birds)){
   out <- points %>%
     mutate(distance_previous = 
              as.numeric(st_distance(points$geometry, points$previous, by_element = TRUE))) %>%
-    select(!"previous")
+    dplyr::select(!"previous")
   
   # write out
   distance_roosts <- rbind(distance_roosts, out)
@@ -1008,7 +952,7 @@ Release location lat/lon:(-37.902374, 144.434323)
 ```{r}
 # read in roost locations, format as spatial
 roosts <- read.csv("data/daily_roost_location.csv") %>%
-  select(!"npoints") %>%
+  dplyr::select(!"npoints") %>%
   vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
   st_as_sf()
 
@@ -1023,7 +967,7 @@ dist <- roosts %>%
   filter(dist_release == max(dist_release)) %>%
   ungroup() %>%
   # add cohort information
-  left_join(select(metadata, c("cohort", "id"))) %>%
+  left_join(dplyr::select(metadata, c("cohort", "id"))) %>%
   # format date as a date
   mutate(date = as_date(date)) %>%
   # arrange by date
@@ -1034,15 +978,253 @@ dist <- roosts %>%
 write.csv(dist, "data/daily_roost_distance_from_release.csv", row.names = FALSE)
 ```
 
-## Statistical analysis
+## Time budget HMM
 
-### H1: social organisation
+How do they allocate their nocturnal movement? Hidden markov model.
 
-### H2: effect on residents
+```{r}
+# read in cleaned night data
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # drop columns notneeded
+  dplyr::select(!c(sunrise, sunset, suntime, tod)) %>%
+  # format date time in posixct
+  mutate(time_local = as.POSIXct(time_local),
+         date_bird = as_date(date_bird)) %>%
+  # rename id column for momentuHMM
+  rename(ID = id)
 
-### H3: benefits for reinforcers
+# prep data for moveHMM
+data_hmm <- data_night %>%
+  prepData(type = "UTM", coordNames = c("easting", "northing"),
+           covNames = c("acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "altitude"))
+```
 
-#### nightly distance moved
+Compare a three state and four state model with a test subset (Nutmeg in June).
+
+```{r}
+# Test subset, Nutmeg 1 month
+dates <- seq(as.Date("2023-06-01"), as.Date("2023-07-01"), "days")
+test <- filter(data_hmm, ID == "Nutmeg" & date_bird %in% dates)
+
+# add vector of the dynamic body acceleration (VEDBA)
+test <- test %>%
+  mutate(vedba = ((sqrt(acceleration_raw_x^2 + acceleration_raw_y^2 + acceleration_raw_x^2))/1000))
+
+# step statistics
+hist(test$step, xlab = "step", main = "", breaks = 30)
+summary(test$step)
+
+# angle statistics
+hist(test$angle, breaks = seq(-pi, pi, length = 15), xlab = "angle", main = "")
+summary(test$angle)
+
+
+# 3 state model parameters
+stepPar <- c(
+  10, 60, 200,   # Means for States 1, 2, and 3 (Resting, Exploring, Traveling/Flying)
+  5, 20, 150,    # Standard deviations for States 1, 2, and 3
+  0.15, 0, 0.5   # Zero-mass values for Resting (0.15), Exploring/Foraging (0), Traveling/Flying (0.5)
+)
+
+anglePar <- c(
+  0, 0, 0,      # Means for all states (0 radians)
+  1.5, 7, 3     # Concentrations for States 1 (Resting), 2 (Exploring), and 4 (Traveling/Flying)
+)
+
+# 3 state model
+hmm3 <- momentuHMM::fitHMM(data = test, 
+               nbStates = 3,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+hmm3
+plot(hmm3)
+
+# Step Parameters for 4 States
+stepPar <- c(
+  10, 60, 150, 300,   # Means for States 1, 2, 3, and 4 (Resting, Exploring, Foraging, Traveling/Flying)
+  5, 15, 100, 150,    # Standard deviations for States 1, 2, 3, and 4 (smaller variance for states like Exploring)
+  0.1, 0, 0.3, 0.15   # Zero-mass values for Resting (0.1), Exploring (0), Foraging (0.3), Traveling/Flying (0.15)
+)
+
+# Angle Parameters for 4 States
+anglePar <- c(
+  0, 0, 0, 0,      # Means for all states (0 radians, slightly shifted for Traveling/Flying)
+  1.5, 5, 2, 3        # Concentrations for States 1 (Resting), 2 (Exploring), 3 (Foraging), 4 (Traveling/Flying)
+)
+
+# 4 state model
+hmm4 <- momentuHMM::fitHMM(data = test, 
+               nbStates = 4,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+hmm4
+plot(hmm4)
+
+# compare 3 and 4 state models
+AIC(hmm3, hmm4)
+```
+
+Prefer the 4 state model both visually and on AIC.
+
+Model      AIC
+1  hmm4 19401.37
+2  hmm3 19443.89
+
+*4 state model description*
+
+State 1: Resting
+
+  * Step Parameters: Small steps (mean = 7.21 m, sd = 5.64 m) with moderate zero-mass (0.155), indicating brief periods of immobility.
+  * Angle Parameters: Slight positive mean (0.117 radians) with low concentration (1.18), suggesting minimal movement and slight shifts in position.
+  * VEDBA Influence: The VEDBA coefficient (1.12) suggests that as VEDBA increases, the likelihood of being in this resting state decreases, implying higher activity levels are less likely to correspond with resting.
+  * Behavior: Represents periods of rest or low activity, with occasional small adjustments in position. 
+  * Transitions to exploring are possible but unlikely (0.1079).
+
+State 2: Exploring
+
+  * Step Parameters: Moderate steps (mean = 93.32 m, sd = 53.80 m) with no zero-mass (0), indicating continuous movement.
+  * Angle Parameters: Near-zero mean (0.027 radians) and moderate concentration (2.72), suggesting straightforward movement with slight directional changes.
+  * VEDBA Influence: The VEDBA coefficient (6.26) indicates a strong positive relationship between VEDBA and exploring behavior. Higher VEDBA corresponds to increased likelihood of staying in this exploring state, which involves moderate movement.
+  * Behavior: Represents active exploration, with directed movement and moderate variability in walking patterns. 
+  * Transitioning to traveling (0.33) or foraging (0.12) is common.
+
+State 3: Foraging
+
+  * Step Parameters: Small steps (mean = 28.66 m, sd = 23.17 m) with moderate zero-mass (0.164), indicating some immobility while foraging.
+  * Angle Parameters: Negative mean (-0.166 radians) and moderate concentration (1.37), suggesting turning behaviors associated with searching or pecking.
+  * VEDBA Influence: The VEDBA coefficient (-1.67) suggests a negative relationship between VEDBA and foraging. As VEDBA increases, the likelihood of being in this state decreases, meaning more active periods with higher body movement (e.g., exploring or traveling) are less likely to align with foraging.
+  * Behavior: Represents foraging, with small steps and frequent turning. Transitions to traveling (0.12) are common, while staying in the foraging state (0.85) is highly probable.
+  
+State 4: Traveling/Flying
+
+  * Step Parameters: Large steps (mean = 253.72 m, sd = 312.95 m) with moderate zero-mass (0.23), indicating potential rest periods during travel.
+  * Angle Parameters: Positive mean (0.262 radians) and moderate concentration (1.92), suggesting frequent directional changes during travel or flight.
+  * VEDBA Influence: The VEDBA coefficient (1.27) indicates a positive relationship between VEDBA and traveling/flying. As VEDBA increases, the likelihood of staying in this state also increases, reflecting that higher movement (e.g., flight) is strongly associated with this state.
+  * Behavior: Represents long-distance movement, likely involving flight. 
+  * Transitions to exploring (0.27) or foraging (0.37) are common, while returning to resting (0.05) is unlikely.
+
+Transition Probabilities:
+
+  * State 1 (Resting): Likely transitions to State 2 (Exploring) or stays in resting.
+  * State 2 (Exploring): May transition to State 4 (Traveling/Flying) or stay exploring.
+  * State 3 (Foraging): Likely stays in foraging or transitions to traveling.
+  * State 4 (Traveling/Flying): Likely transitions to exploring or foraging, with low likelihood of returning to resting.
+
+Initial Distribution:
+The model starts almost exclusively in State 3 (Foraging) (99.98%), reflecting a strong initial foraging activity
+
+
+Now try a range of starting values to optimise parameters.
+
+```{r}
+# For reproducibility
+set.seed(12345)
+
+# Number of tries with different starting values
+niter <- 10
+
+# Save list of fitted models
+allm <- list()
+
+for(i in 1:niter) {
+ # Step length mean
+  stepMean0 <- runif(4, min = c(5, 50, 100, 200), max = c(50, 150, 300, 400))
+  
+  # Step length standard deviation
+  stepSD0 <- runif(4, min = c(5, 30, 50, 100), max = c(30, 100, 150, 200))
+  
+  # Zero mass
+  zeroMass0 <- runif(4, min = c(0.5, 0.05, 0.01, 0.2), max = c(0.9, 0.3, 0.1, 0.3))
+  
+  # Turning angle mean
+  angleMean0 <- c(0, 0, 0, 0.1)
+  
+  # Turning angle concentration
+  angleCon0 <- runif(4, min = c(0.5, 3, 5, 3), max = c(3, 10, 15, 10))
+  
+  # Fit model
+  stepPar0 <- c(stepMean0, stepSD0, zeroMass0)
+  anglePar0 <- c(angleMean0, angleCon0)
+  
+  allm[[i]] <- tryCatch({
+    momentuHMM::fitHMM(
+      data = test,
+      nbStates = 4,
+      dist = list(step = "gamma", angle = "vm"),
+      Par0 = list(step = stepPar0, angle = anglePar0),
+      estAngleMean = list(angle = TRUE),
+      formula = ~vedba
+    )
+  }, error = function(e) NULL)
+}
+
+# Extract likelihoods of fitted models
+allnllk <- unlist(lapply(allm, function(m) m$mod$minimum))
+
+# Index of best fitting model (smallest negative log-likelihood)
+whichbest <- which.min(allnllk)
+
+# Best fitting model
+mbest <- allm[[whichbest]]
+mbest
+plot(mbest)
+
+mbest$
+```
+
+Pretty similar outcomes and interpretation to the original model, but states 2 and 3 have swapped positions in the model. Also the step lengths for state 2 are longer. 
+
+This model:
+ mbest[["mle"]][["step"]]
+           state 1    state 2     state 3     state 4
+mean     7.1906287 28.8285146 94.42954804 255.7081955
+sd       5.6234347 23.2235980 54.53422724 315.9460045
+zeromass 0.1548154  0.1668964  0.01756811   0.2130973
+
+ mbest[["mle"]][["angle"]]
+                state 1    state 2    state 3  state 4
+mean          0.1107482 -0.1662959 0.01981132 0.275707
+concentration 1.1810018  1.3751230 2.70520468 1.925114
+
+Previous model:
+ hmm4[["mle"]][["step"]]
+          state 1      state 2    state 3     state 4
+mean     7.209585 9.332171e+01 28.6620142 253.7168279
+sd       5.635077 5.380436e+01 23.1683246 312.9453058
+zeromass 0.155442 9.999968e-09  0.1644345   0.2281307
+ hmm4[["mle"]][["angle"]]
+                state 1    state 2    state 3   state 4
+mean          0.1174073 0.02666516 -0.1661067 0.2620442
+concentration 1.1832840 2.71779582  1.3708692 1.9180780
+
+Apply to all birds
+
+```{r}
+
+```
+
+
+# Social networks analysis
+
+
+
+# Statistical analysis
+
+## H1: social organisation
+
+## H2: effect on residents
+
+## H3: benefits for reinforcers
+
+### 3a: distance moved
 
 Is there a difference between residents and reinforcers in their distance moved?
 
@@ -1055,7 +1237,7 @@ distance_daily <- read.csv("data/daily_distance_moved.csv")
 # filter to establishment period
 establishment_100 <- distance_daily %>%
   # add metadata
-  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
   mutate(date_bird = as_date(date_bird),
          start_date = as_date(start_date)) %>%
@@ -1113,14 +1295,14 @@ ggplot(establishment_55)+
   ylab("Daily distance moved (m)")
 
 # test whether establishment differs between the groups
-m1a <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m1a)
-anova(m1a)
+m3a <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m3a)
+anova(m3a)
 ```
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
 
-#### roost establishment
+### 3b: roost establishment
 
 Do the cohorts differ in their roost establishment?
 
@@ -1130,7 +1312,7 @@ Visualise daily movement to 100 days.
 # read in data
 distance_roosts <- read.csv("data/daily_distance_between_roosts.csv") %>%
    # add metadata
-  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
   mutate(date = as_date(date),
          start_date = as_date(start_date))
@@ -1191,16 +1373,16 @@ ggplot(establishment_55)+
   ylab("Distance between consecutive roosts (m)")
 
 # test whether establishment differs between the groups
-m2a <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m2a)
-anova(m2a)
+m3b <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m3b)
+anova(m3b)
 ```
 
 Settling in was more static in residents than reinforcers, who continued to move more. The resident cohort settled on fixed roosts quickly, whereas the reinforcers alternated between roosting in the central woodland and roosting on the eastern boundary. 
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more than reinforcers (estimate: -0.01104).
 
-#### release stie fidelity
+### 3c: release stie fidelity
 
 Does release site fidelity differ between the cohorts?
 
@@ -1212,7 +1394,7 @@ dist_release <- read.csv("data/daily_roost_distance_from_release.csv")
 # filter to first 100 days
 establishment_100 <- dist_release %>%
   # add metadata
-  left_join(select(metadata, c("id", "cohort", "start_date"))) %>%
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
   mutate(date = as_date(date),
          start_date = as_date(start_date)) %>%
@@ -1270,9 +1452,65 @@ hist(establishment_55$dist_log)
 ggqqplot(establishment_55$dist_log)
 
 # test whether establishment differs between the groups
-m3a <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
-summary(m3a)
-anova(m3a)
+m3c <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
+summary(m3c)
+anova(m3c)
 ```
 
 We found a significant effects of elapsed time and the interaction of time and cohort on the daily distance from release site to roosts. However there was no effect of cohort alone. Both cohorts increased their distance from the release site over time, but residents did this faster than reinforcers. 
+
+# Survival analysis
+
+Do reinforcers survive better than the residents? 
+
+This is hard to answer because not tracked as long and some birds moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
+
+Start by looking at the overall survival probabilities for all birds.
+
+```{r m6}
+# Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
+surv_data <- metadata %>%
+  # remove columns not needed
+  dplyr::select(!c(location, abbbs, band, alive, release_year)) %>%
+  # add survival time (persistence) - right censored data
+  mutate(time = end_date - start_date) %>%
+  # add status - whether death occurs
+  mutate(status = ifelse(is.na(mortality), 0, 1))
+
+km <- with(surv_data, Surv(time, status))
+  
+# Fit a basic survival model
+kmfit <- survfit(Surv(time, status) ~ 1, data = surv_data)
+
+# Estimated survival probabilities
+summary(kmfit, times = c(1, 10, 30, 54, 100, 365))
+
+# plot
+autoplot(kmfit)
+```
+
+The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
+
+The probability of survival to 54 days (the study period) is 91% (upper CI = 100%, lower CI = 83%).
+
+Now compare cohorts
+
+```{r}
+# Fit a survival model by cohort
+kmfit_cohort <- survfit(Surv(time, status) ~ cohort, data = surv_data)
+
+summary(kmfit_cohort, times = c(1,30,54))
+
+# plot
+autoplot(kmfit_cohort)
+
+# Fit Cox Model
+cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
+summary(cox)
+```
+
+The probability of survival to 54 days for residents is 87% (upper CI = 79%, lower CI = 71%). 
+
+The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
+
+So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.961). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
