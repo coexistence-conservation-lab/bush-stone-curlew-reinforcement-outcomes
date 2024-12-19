@@ -989,26 +989,35 @@ data_night <- read.csv("data/data_clean_night.csv") %>%
   dplyr::select(!c(sunrise, sunset, suntime, tod)) %>%
   # format date time in posixct
   mutate(time_local = as.POSIXct(time_local),
-         date_bird = as_date(date_bird)) %>%
-  # rename id column for momentuHMM
-  rename(ID = id)
+         date_bird = as_date(date_bird))
 
 # prep data for moveHMM
 data_hmm <- data_night %>%
   prepData(type = "UTM", coordNames = c("easting", "northing"),
-           covNames = c("acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "altitude"))
+           covNames = c("acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "altitude")) %>%
+# add vector of the dynamic body acceleration (VEDBA)
+  mutate(vedba = ((sqrt(acceleration_raw_x^2 + acceleration_raw_y^2 + acceleration_raw_x^2))/1000))
 ```
 
-Compare a three state and four state model with a test subset (Nutmeg in June).
+### Test model
+
+Create a test subset of one bird for one month (Nutmeg in June 2023). Investigate step and angle statistics to help define starting parameters. 
 
 ```{r}
 # Test subset, Nutmeg 1 month
 dates <- seq(as.Date("2023-06-01"), as.Date("2023-07-01"), "days")
-test <- filter(data_hmm, ID == "Nutmeg" & date_bird %in% dates)
+test <- filter(data_hmm, id == "Aurora" & date_bird %in% dates)
 
-# add vector of the dynamic body acceleration (VEDBA)
-test <- test %>%
-  mutate(vedba = ((sqrt(acceleration_raw_x^2 + acceleration_raw_y^2 + acceleration_raw_x^2))/1000))
+# format as amt and calculate step lengths
+steps <- test %>%
+  # format as amt track - add columns as needed
+  make_track(.x = x, .y = y, .t = time_local, id = id, date_bird = date_bird)
+
+# check sample rate
+summarize_sampling_rate(steps)
+
+# resample track to 5 minutes
+track_resample(rate = minutes(5), tolerance = minutes(1))
 
 # step statistics
 hist(test$step, xlab = "step", main = "", breaks = 30)
@@ -1018,17 +1027,24 @@ summary(test$step)
 hist(test$angle, breaks = seq(-pi, pi, length = 15), xlab = "angle", main = "")
 summary(test$angle)
 
+```
+
+#### Number of states
+
+Compare a three state and four state model to see what performs better.
+
+```{r}
 
 # 3 state model parameters
 stepPar <- c(
-  10, 60, 200,   # Means for States 1, 2, and 3 (Resting, Exploring, Traveling/Flying)
-  5, 20, 150,    # Standard deviations for States 1, 2, and 3
-  0.15, 0, 0.5   # Zero-mass values for Resting (0.15), Exploring/Foraging (0), Traveling/Flying (0.5)
+  10, 60, 200,   # Means
+  5, 20, 150,    # Standard deviations 
+  0.15, 0, 0.5   # Zero-mass values
 )
 
 anglePar <- c(
-  0, 0, 0,      # Means for all states (0 radians)
-  1.5, 7, 3     # Concentrations for States 1 (Resting), 2 (Exploring), and 4 (Traveling/Flying)
+  0, 0, 0,      # Means
+  1.5, 7, 3     # Concentrations
 )
 
 # 3 state model
@@ -1045,15 +1061,15 @@ plot(hmm3)
 
 # Step Parameters for 4 States
 stepPar <- c(
-  10, 60, 150, 300,   # Means for States 1, 2, 3, and 4 (Resting, Exploring, Foraging, Traveling/Flying)
-  5, 15, 100, 150,    # Standard deviations for States 1, 2, 3, and 4 (smaller variance for states like Exploring)
-  0.1, 0, 0.3, 0.15   # Zero-mass values for Resting (0.1), Exploring (0), Foraging (0.3), Traveling/Flying (0.15)
+  10, 60, 150, 300,   # Means 
+  5, 15, 100, 150,    # Standard deviations 
+  0.1, 0, 0.3, 0.15   # Zero-mass values 
 )
 
 # Angle Parameters for 4 States
 anglePar <- c(
-  0, 0, 0, 0,      # Means for all states (0 radians, slightly shifted for Traveling/Flying)
-  1.5, 5, 2, 3        # Concentrations for States 1 (Resting), 2 (Exploring), 3 (Foraging), 4 (Traveling/Flying)
+  0, 0, 0, 0,         # Means 
+  1.5, 5, 2, 3        # Concentrations
 )
 
 # 4 state model
@@ -1078,51 +1094,9 @@ Model      AIC
 1  hmm4 19401.37
 2  hmm3 19443.89
 
-*4 state model description*
+#### Optimise parameters
 
-State 1: Resting
-
-  * Step Parameters: Small steps (mean = 7.21 m, sd = 5.64 m) with moderate zero-mass (0.155), indicating brief periods of immobility.
-  * Angle Parameters: Slight positive mean (0.117 radians) with low concentration (1.18), suggesting minimal movement and slight shifts in position.
-  * VEDBA Influence: The VEDBA coefficient (1.12) suggests that as VEDBA increases, the likelihood of being in this resting state decreases, implying higher activity levels are less likely to correspond with resting.
-  * Behavior: Represents periods of rest or low activity, with occasional small adjustments in position. 
-  * Transitions to exploring are possible but unlikely (0.1079).
-
-State 2: Exploring
-
-  * Step Parameters: Moderate steps (mean = 93.32 m, sd = 53.80 m) with no zero-mass (0), indicating continuous movement.
-  * Angle Parameters: Near-zero mean (0.027 radians) and moderate concentration (2.72), suggesting straightforward movement with slight directional changes.
-  * VEDBA Influence: The VEDBA coefficient (6.26) indicates a strong positive relationship between VEDBA and exploring behavior. Higher VEDBA corresponds to increased likelihood of staying in this exploring state, which involves moderate movement.
-  * Behavior: Represents active exploration, with directed movement and moderate variability in walking patterns. 
-  * Transitioning to traveling (0.33) or foraging (0.12) is common.
-
-State 3: Foraging
-
-  * Step Parameters: Small steps (mean = 28.66 m, sd = 23.17 m) with moderate zero-mass (0.164), indicating some immobility while foraging.
-  * Angle Parameters: Negative mean (-0.166 radians) and moderate concentration (1.37), suggesting turning behaviors associated with searching or pecking.
-  * VEDBA Influence: The VEDBA coefficient (-1.67) suggests a negative relationship between VEDBA and foraging. As VEDBA increases, the likelihood of being in this state decreases, meaning more active periods with higher body movement (e.g., exploring or traveling) are less likely to align with foraging.
-  * Behavior: Represents foraging, with small steps and frequent turning. Transitions to traveling (0.12) are common, while staying in the foraging state (0.85) is highly probable.
-  
-State 4: Traveling/Flying
-
-  * Step Parameters: Large steps (mean = 253.72 m, sd = 312.95 m) with moderate zero-mass (0.23), indicating potential rest periods during travel.
-  * Angle Parameters: Positive mean (0.262 radians) and moderate concentration (1.92), suggesting frequent directional changes during travel or flight.
-  * VEDBA Influence: The VEDBA coefficient (1.27) indicates a positive relationship between VEDBA and traveling/flying. As VEDBA increases, the likelihood of staying in this state also increases, reflecting that higher movement (e.g., flight) is strongly associated with this state.
-  * Behavior: Represents long-distance movement, likely involving flight. 
-  * Transitions to exploring (0.27) or foraging (0.37) are common, while returning to resting (0.05) is unlikely.
-
-Transition Probabilities:
-
-  * State 1 (Resting): Likely transitions to State 2 (Exploring) or stays in resting.
-  * State 2 (Exploring): May transition to State 4 (Traveling/Flying) or stay exploring.
-  * State 3 (Foraging): Likely stays in foraging or transitions to traveling.
-  * State 4 (Traveling/Flying): Likely transitions to exploring or foraging, with low likelihood of returning to resting.
-
-Initial Distribution:
-The model starts almost exclusively in State 3 (Foraging) (99.98%), reflecting a strong initial foraging activity
-
-
-Now try a range of starting values to optimise parameters.
+Try a range of starting values to optimise parameters.
 
 ```{r}
 # For reproducibility
@@ -1134,8 +1108,11 @@ niter <- 10
 # Save list of fitted models
 allm <- list()
 
+# Save list of starting parameters
+parameters <- list()
+
 for(i in 1:niter) {
- # Step length mean
+  # Step length mean
   stepMean0 <- runif(4, min = c(5, 50, 100, 200), max = c(50, 150, 300, 400))
   
   # Step length standard deviation
@@ -1145,10 +1122,20 @@ for(i in 1:niter) {
   zeroMass0 <- runif(4, min = c(0.5, 0.05, 0.01, 0.2), max = c(0.9, 0.3, 0.1, 0.3))
   
   # Turning angle mean
-  angleMean0 <- c(0, 0, 0, 0.1)
+  angleMean0 <- c(0, 0, 0, 0)
   
   # Turning angle concentration
   angleCon0 <- runif(4, min = c(0.5, 3, 5, 3), max = c(3, 10, 15, 10))
+  
+  # Parameter table
+  parameters[[i]] <- data.frame(
+    state = rep(1:4),
+    stepMean0 = stepMean0,
+    stepSD0 = stepSD0,
+    zeroMass0 = zeroMass0,
+    angleMean0 = angleMean0,
+    angleCon0 = angleCon0
+  )
   
   # Fit model
   stepPar0 <- c(stepMean0, stepSD0, zeroMass0)
@@ -1176,41 +1163,174 @@ whichbest <- which.min(allnllk)
 mbest <- allm[[whichbest]]
 mbest
 plot(mbest)
+plotStates(mbest)
 
-mbest$
+# Best starting parameters 
+pbest_start <- parameters[[whichbest]]
+
+# Best outcome parameters
+pbest_outcome <- mbest$mle
 ```
 
-Pretty similar outcomes and interpretation to the original model, but states 2 and 3 have swapped positions in the model. Also the step lengths for state 2 are longer. 
+Best outcome parameters:
 
-This model:
- mbest[["mle"]][["step"]]
+$step
            state 1    state 2     state 3     state 4
-mean     7.1906287 28.8285146 94.42954804 255.7081955
-sd       5.6234347 23.2235980 54.53422724 315.9460045
-zeromass 0.1548154  0.1668964  0.01756811   0.2130973
+mean     7.2211441 28.7419041 93.49649922 253.7447067
+sd       5.6455927 23.2401216 53.89146576 312.9671872
+zeromass 0.1559012  0.1669094  0.01833069   0.2101607
 
- mbest[["mle"]][["angle"]]
-                state 1    state 2    state 3  state 4
-mean          0.1107482 -0.1662959 0.01981132 0.275707
-concentration 1.1810018  1.3751230 2.70520468 1.925114
-
-Previous model:
- hmm4[["mle"]][["step"]]
-          state 1      state 2    state 3     state 4
-mean     7.209585 9.332171e+01 28.6620142 253.7168279
-sd       5.635077 5.380436e+01 23.1683246 312.9453058
-zeromass 0.155442 9.999968e-09  0.1644345   0.2281307
- hmm4[["mle"]][["angle"]]
+$angle
                 state 1    state 2    state 3   state 4
-mean          0.1174073 0.02666516 -0.1661067 0.2620442
-concentration 1.1832840 2.71779582  1.3708692 1.9180780
+mean          0.1170206 -0.1668971 0.02669791 0.2645331
+concentration 1.1835577  1.3724136 2.71667136 1.9204624
 
-Apply to all birds
+$beta
+               1 -> 2    1 -> 3    1 -> 4    2 -> 1     2 -> 3    2 -> 4
+(Intercept) -5.204991 -8.829121 -2.213485 -6.221311 -10.254742 -4.297407
+vedba        6.313020 -3.078513 -1.617744  5.398456  -4.197239  4.724587
+               3 -> 1    3 -> 2     3 -> 4    4 -> 1    4 -> 2    4 -> 3
+(Intercept) -8.220560 -2.225103  0.4526661 -2.324431 -0.453848  1.538068
+vedba       -3.345948  1.189772 -2.1410536  1.063941  1.259101 -3.388000
+
+$delta
+               state 1   state 2      state 3      state 4
+ID:Nutmeg 0.0004158271 0.9993644 5.228222e-05 0.0001674458
+
+### Run HMM
+
+Apply best parameters for a 4 state model to all birds.
 
 ```{r}
+# Step Parameters 
+stepPar <- c(
+  7, 29, 93, 253,   # Means
+  6, 23, 54, 313,    # Standard deviations 
+  0.16, 0.17, 0.02, 0.21   # Zero-mass values 
+)
+
+# Angle Parameters for 4 States
+anglePar <- c(
+  0.11, -0.17, 0.03, 0.26,         # Means 
+  1.18, 1.37, 2.72, 1.92        # Concentrations
+)
+
+# 4 state model (approx. 7 hours to run) 🐢🐢
+hmm_all <- momentuHMM::fitHMM(data = data_hmm, 
+               nbStates = 4,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+# see states
+hmm_all
+
+# plot results
+plot(hmm_all)
+
+# check residuals
+plotPR(hmm_all)
+
+# Decode states
+data_hmm2 <- data_hmm %>%
+  mutate(states = viterbi(hmm_all))
+
+# save output
+write.csv(data_hmm2, "data/data_hmm.csv", row.names = FALSE)
 
 ```
 
+$step
+$step$est
+           state 1    state 2    state 3     state 4
+mean     8.2208094 20.3895440 57.8629585 129.4745424
+sd       6.6718586 17.2595917 33.1696834 142.4877739
+zeromass 0.1835534  0.1435767  0.1017199   0.1056076
+
+$step$se
+             state 1     state 2     state 3    state 4
+mean     0.059195569 0.158752114 0.504588470 1.62585187
+sd       0.059392166 0.135826249 0.350108882 1.68770684
+zeromass 0.001644487 0.001121659 0.002745764 0.00326152
+
+$step$lower
+           state 1    state 2     state 3      state 4
+mean     8.1047882 20.0783956 56.87398323 126.28793127
+sd       6.5554521 16.9933771 32.48348260 139.17992928
+zeromass 0.1803303  0.1413783  0.09633832   0.09921516
+
+$step$upper
+           state 1    state 2    state 3     state 4
+mean     8.3368306 20.7006924 58.8519337 132.6611535
+sd       6.7882651 17.5258063 33.8558842 145.7956185
+zeromass 0.1867766  0.1457751  0.1071015   0.1120001
+
+
+$angle
+$angle$est
+                    state 1     state 2     state 3    state 4
+mean          -0.0006350116 -0.02490599 0.005901283 0.02889899
+concentration  0.9849618919  1.34078324 2.855987790 1.62310950
+
+$angle$se
+                  state 1     state 2     state 3    state 4
+mean          0.008772497 0.004360951 0.005746417 0.01000978
+concentration 0.009074356 0.008098515 0.040103562 0.01989011
+
+$angle$lower
+                  state 1    state 2      state 3     state 4
+mean          -0.01782879 -0.0334533 -0.005361488 0.009280183
+concentration  0.96717648  1.3249104  2.777386254 1.584125600
+
+$angle$upper
+                 state 1     state 2    state 3    state 4
+mean          0.01655877 -0.01635868 0.01716405 0.04851779
+concentration 1.00274730  1.35665604 2.93458933 1.66209339
+
+
+$gamma
+$gamma$est
+            state 1    state 2      state 3    state 4
+state 1 0.931458331 0.05761075 2.899808e-05 0.01090192
+state 2 0.025798292 0.89292770 4.665911e-02 0.03461490
+state 3 0.002059385 0.20857863 7.299991e-01 0.05936288
+state 4 0.036632497 0.16340398 1.137106e-01 0.68625289
+
+$gamma$se
+            state 1     state 2     state 3      state 4
+state 1 0.001852868 0.001856780         NaN 0.0009593681
+state 2 0.001035936 0.001734979 0.001537815 0.0010952092
+state 3 0.001406860 0.004757413 0.005098452 0.0034170704
+state 4 0.002882481 0.006547791 0.005798381 0.0077365855
+
+$gamma$lower
+            state 1    state 2    state 3     state 4
+state 1 0.927736437 0.05407762        NaN 0.009173398
+state 2 0.023843831 0.88947937 0.04373596 0.032531334
+state 3 0.000539143 0.19940768 0.71989062 0.053008962
+state 4 0.031383508 0.15097250 0.10283144 0.670894349
+
+$gamma$upper
+            state 1    state 2    state 3    state 4
+state 1 0.935001961 0.06135974        NaN 0.01295190
+state 2 0.027908379 0.89628098 0.04976747 0.03682684
+state 3 0.007832716 0.21805649 0.73987462 0.06642498
+state 4 0.042720676 0.17664613 0.12557970 0.70121389
+
+### Time budget
+
+```{r}
+# read in data with hmm states
+data_hmm <- read.csv("data/data_hmm.csv")
+
+
+```
+
+
+## Home range
+50%  KUD
 
 # Social networks analysis
 
