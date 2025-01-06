@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1420,8 +1420,41 @@ hr_area <- st_drop_geometry(hr_daily)
 write.csv(hr_area, "data/hr_daily_area.csv", row.names = TRUE)
 ```
 
-# Social networks analysis
+# Social network analysis
 
+The key issue addressed in this paper is whether social interaction occurs between residents and reinforcers, and if so whether this mediates post-release outcomes for the cohorts. 
+
+First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. Given we have a large dataset we elected to use contact analysis in wildlifeDI. We will do this for nocturnal data only since diurnal roosts would cause temporal auto-correlation. For diurnal data, we will calculate rate of roost sharing. 
+
+To determine the temporal interaction threshold we use the mean sampling rate.
+
+```{r}
+# read in night data
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # format time as posixct
+  mutate(time_local = as.POSIXct(time_local))
+
+# summarise sampling rate to decide on temporal interaction threshold
+steps <- data_night %>%
+  # format as amt track - add columns as needed
+  make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird)
+
+summarize_sampling_rate(steps)
+```
+
+The mean sampling rate is 79 seconds (we will be rounding up to 80). 
+
+```{r}
+
+```
+
+
+  
+Social network analyses were undertaken using the STRAND package by [Ross et al. (2024)](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.14021).
+
+```{r}
+data(Baboon_Data)
+```
 
 
 # Statistical analysis
