@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, suncalc, survival, survminer, terra, tidyterra, tidyverse)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -980,6 +980,8 @@ write.csv(dist, "data/daily_roost_distance_from_release.csv", row.names = FALSE)
 
 ## Time budget HMM
 
+Time budget can be another indicator of post-release behavioural modification. We expect them to become more efficient with their foraging over time as they learn where to find and exploit resources. So we expect to see more direct travel and less time spent foraging over time. 
+
 How do they allocate their nocturnal movement? Hidden markov model.
 
 ```{r}
@@ -1325,12 +1327,98 @@ state 4 0.042720676 0.17664613 0.12557970 0.70121389
 # read in data with hmm states
 data_hmm <- read.csv("data/data_hmm.csv")
 
+# calculate proportion of fixes in each state per bird per day
+budget_daily <- data_hmm %>%
+  group_by(ID, date_bird) %>%
+  # count of states
+  count(states) %>%
+  # pivot to wide format
+  pivot_wider(names_from = 3, values_from = 4) %>%
+  # rename state columns
+  rename(state1 = 3,
+         state2 = 4,
+         state3 = 5,
+         state4 = 6) %>%
+  # replace NAs with zeros
+  replace(is.na(.), 0) %>%
+  # calculate proportion
+  mutate(total = sum(state1, state2, state3, state4),
+         state1p = state1/total,
+         state2p = state2/total,
+         state3p = state3/total,
+         state4p = state4/total) %>%
+  arrange(date_bird)
 
+# plot state2 over time
+ggplot(budget_daily)+
+  geom_path(aes(as_date(date_bird), mean(state2p)))
+
+# summarise over time
+budget <- budget_daily %>%
+  # calculate mean and sd
+  group_by(ID) %>%
+  summarise(s1m = mean(state1p),
+            s2m = mean(state2p),
+            s3m = mean(state3p),
+            s4m = mean(state4p),
+            s1sd = sd(state1p),
+            s2sd = sd(state2p),
+            s3sd = sd(state3p),
+            s4sd = sd(state4p))
 ```
 
-
 ## Home range
-50%  KUD
+
+Home range change is another way to investigate post-release behavioural modification. Previous studies have demonstrated decreasing home ranges over time as individuals first explore their new surrounds and then settle on a core area of exploitation. We define home range as 50% kernel utilisation distribution, with both nocturnal and diurnal fixes.
+
+```{r}
+# Read in cleaned data 
+data <- read.csv("data/data_cleaned.csv") %>%
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne"),
+         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "UTC")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))%>%
+  filter(!id %in% c("Wobbles", "Star"))
+
+# set up data in spatial points dataframe
+locs <- SpatialPointsDataFrame(coordinates(
+  cbind(data$easting, data$northing)), data = data)
+
+# home range polygon per bird per day 🐢🐢 2.5 hours
+birds <- as.character(unique(data$id))
+days <- unique(locs[["date"]])
+
+hr_daily <- data.frame()
+
+for (i in 1:length(birds)){
+  for (j in 1:length(days)){
+    points <- subset(locs, id == birds[i] & date == days[j],
+                     select = id)
+    if (length(points)<5){
+      next
+    }
+    kud <- kernelUD(points[,1], h="href", grid=1000, extent = 4) %>% 
+      getverticeshr(percent = 50)
+    
+    proj4string(kud) <- CRS("EPSG:32755")
+    
+    kud_df_utm <- st_as_sf(kud)%>%
+      mutate(date = days[j])
+    
+    print(head(kud_df_utm, n= 1L))
+    
+    hr_daily <- rbind.data.frame(hr_daily, kud_df_utm)
+  }}
+
+# extract area per day i.e. drop geometry
+hr_area <- st_drop_geometry(hr_daily)
+
+# save to file
+write.csv(hr_area, "data/hr_daily_area.csv", row.names = TRUE)
+```
 
 # Social networks analysis
 
@@ -1583,7 +1671,7 @@ We found a significant effects of elapsed time and the interaction of time and c
 
 Do reinforcers survive better than the residents? 
 
-This is hard to answer because not tracked as long and some birds moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
+This is hard to answer because not tracked as long and some birds were subsequently moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
 
 Start by looking at the overall survival probabilities for all birds.
 
