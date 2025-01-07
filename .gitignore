@@ -4,3 +4,4 @@ data/gpsclean.csv
 data/data_cleaned.csv
 data/data_clean_day.csv
 data/data_clean_night.csv
+data/contact_events.csv

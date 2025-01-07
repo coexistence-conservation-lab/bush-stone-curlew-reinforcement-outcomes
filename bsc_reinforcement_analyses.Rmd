@@ -1426,32 +1426,42 @@ The key issue addressed in this paper is whether social interaction occurs betwe
 
 ## Proximity anaysis
 
-First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. Given we have a large dataset we elected to use contact analysis in wildlifeDI. We will do this for nocturnal data only since diurnal roosts would cause temporal auto-correlation. For diurnal data, we will calculate rate of roost sharing. 
+First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. Given we have a large dataset we elected to use contact analysis in wildlifeDI.  
 
 To determine the temporal interaction threshold we use the mean sampling rate.
 
 ```{r}
-# read in night data
-data_night <- read.csv("data/data_clean_night.csv") %>%
-  # format time as posixct
-  mutate(time_local = as.POSIXct(time_local),
-         date = as_date(date))
+# Read in cleaned data 
+data <- read.csv("data/data_cleaned.csv") %>%
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne")) %>%
+  # drop birds excluded from analyses
+  filter(!id %in% c("Wobbles", "Star")) %>%
+  # drop NAs
+  na.omit()
 
 # summarise sampling rate to decide on temporal interaction threshold
-steps <- data_night %>%
-  # format as amt track - add columns as needed
-  make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird)
+steps <- data %>%
+  make_track(.x = easting, .y = northing, .t = time_local, id = id) %>%
+  nest(data = -"id")
 
-summarize_sampling_rate(steps)
+sampling_rates <- steps %>%
+  transmute(id, summary = map(data, summarize_sampling_rate)) %>%
+  unnest(summary)
+
+mean(sampling_rates$mean)
 ```
 
-The mean sampling rate is 79 seconds (we will be rounding up to 80). 
+The mean sampling rate for the cleaned data is 8 minutes. We will use a time parameter of 4 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
 
-Now using wildlifeDI for contact analysis. First format tracks as move2 objects for use in wildlifeDI.
+First format tracks as move2 objects for use in wildlifeDI.
 
 ```{r}
 # format track data as move2 object
-move <- mt_as_move2(data_night, coords = c("easting", "northing"), time_column = "time_local", track_id_column = "id") %>%
+move <- mt_as_move2(data, coords = c("easting", "northing"), time_column = "time_local", track_id_column = "id") %>%
   # add crs
   sf::st_set_crs("EPSG:32755") %>%
   # needed to omit NAs for conProcess to work
@@ -1463,29 +1473,60 @@ We use a dcPlot of paired encounters across distance to approximate the distance
 Our expert guesstimate was a threshold of 30m (based on visual observation of interactions between individuals in the field during monitoring). 
 
 ```{r}
-# one month subset
-temp <- seq.Date(from = as_date("2023-08-01"), to = as_date("2023-09-01"), by = "day")
-move_subset <- subset(move, date %in% temp)
+# one week subset
+temp <- seq.Date(from = as_date("2023-06-01"), to = as_date("2023-06-07"), by = "day")
+move_subset <- filter(move, date %in% temp)
 
 # plot distribution of paired fixes by distance
-dcPlot(move_subset,tc=80,dmax=500)
-dcPlot(move_subset,tc=80,dmax=100)
+dcPlot(move_subset,tc=4*60,dmax=500)
+dcPlot(move_subset,tc=4*60,dmax=100)
 ```
 
 The majority of contacts took place <40m apart. I'll retain the expert guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty of 20m (on cleaned data).
 
 ```{r}
-# calculate proximity contact events 
-contacts <- conProcess(move,dc=30,tc=80)
+# calculate proximity contact events 🐢🐢🐢 ran overnight 
+contacts <- conProcess(move,dc=30,tc=4*60)
+
+# save output
+write.csv(contacts, "data/contact_events.csv", row.names = FALSE)
 
 # ratio of contact to non-contact events 
 table(contacts$contact)
 ```
 
-A total of 493 contacts have been identified in the dataset.
+A total of 349409  contacts have been identified in the track, that is 47% of fixes
 
-Next we find periods of continuous contact
+Next we find periods of continuous contact and calculate some summary statistics about these interactions.
 
+```{r}
+# find periods of continous interaction, defined as within 1 hour
+contact_period <- conPhase(contacts, pc=60*60)
+
+# calculate summary statistics about interaction durations
+contact_summary <- contact_period %>%
+  sf::st_drop_geometry() %>%
+  filter(!is.na(contact_pha)) %>%
+  group_by(contact_pha) %>%
+  summarise(nfix = n(),
+            t1 = min(time_local),
+            t2 = max(time_local),
+            duration = as.numeric(
+              difftime(max(time_local), min(time_local), units = "mins")),
+            avg_d = mean(contact_d,na.rm=T),
+            min_d = min(contact_d,na.rm=T),
+            max_d = max(contact_d,na.rm=T))
+
+# histogram contact distances
+hist(contact_summary$avg_d)
+
+# histogram contact durations
+hist(contact_summary$duration)
+```
+
+15m seems to be the average distance of an interaction - which makes me confident in the distance parameter of 30m. 
+
+Most interactions were 0-8 hours.The longest interaction was 70 hours!
 
 ## Social network
   
