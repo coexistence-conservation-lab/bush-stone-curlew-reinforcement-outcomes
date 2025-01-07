@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, crawl, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move, momentuHMM, scattermore, sf, spThin, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, janitor, lme4, lmerTest, move2, momentuHMM, scattermore, sf, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1420,9 +1420,11 @@ hr_area <- st_drop_geometry(hr_daily)
 write.csv(hr_area, "data/hr_daily_area.csv", row.names = TRUE)
 ```
 
-# Social network analysis
+# Conspecific interactions
 
 The key issue addressed in this paper is whether social interaction occurs between residents and reinforcers, and if so whether this mediates post-release outcomes for the cohorts. 
+
+## Proximity anaysis
 
 First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. Given we have a large dataset we elected to use contact analysis in wildlifeDI. We will do this for nocturnal data only since diurnal roosts would cause temporal auto-correlation. For diurnal data, we will calculate rate of roost sharing. 
 
@@ -1432,7 +1434,8 @@ To determine the temporal interaction threshold we use the mean sampling rate.
 # read in night data
 data_night <- read.csv("data/data_clean_night.csv") %>%
   # format time as posixct
-  mutate(time_local = as.POSIXct(time_local))
+  mutate(time_local = as.POSIXct(time_local),
+         date = as_date(date))
 
 # summarise sampling rate to decide on temporal interaction threshold
 steps <- data_night %>%
@@ -1444,11 +1447,47 @@ summarize_sampling_rate(steps)
 
 The mean sampling rate is 79 seconds (we will be rounding up to 80). 
 
-```{r}
+Now using wildlifeDI for contact analysis. First format tracks as move2 objects for use in wildlifeDI.
 
+```{r}
+# format track data as move2 object
+move <- mt_as_move2(data_night, coords = c("easting", "northing"), time_column = "time_local", track_id_column = "id") %>%
+  # add crs
+  sf::st_set_crs("EPSG:32755") %>%
+  # needed to omit NAs for conProcess to work
+  na.omit()
 ```
 
+We use a dcPlot of paired encounters across distance to approximate the distance threshold (using a subset to reduce processing time).
 
+Our expert guesstimate was a threshold of 30m (based on visual observation of interactions between individuals in the field during monitoring). 
+
+```{r}
+# one month subset
+temp <- seq.Date(from = as_date("2023-08-01"), to = as_date("2023-09-01"), by = "day")
+move_subset <- subset(move, date %in% temp)
+
+# plot distribution of paired fixes by distance
+dcPlot(move_subset,tc=80,dmax=500)
+dcPlot(move_subset,tc=80,dmax=100)
+```
+
+The majority of contacts took place <40m apart. I'll retain the expert guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty of 20m (on cleaned data).
+
+```{r}
+# calculate proximity contact events 
+contacts <- conProcess(move,dc=30,tc=80)
+
+# ratio of contact to non-contact events 
+table(contacts$contact)
+```
+
+A total of 493 contacts have been identified in the dataset.
+
+Next we find periods of continuous contact
+
+
+## Social network
   
 Social network analyses were undertaken using the STRAND package by [Ross et al. (2024)](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.14021).
 
