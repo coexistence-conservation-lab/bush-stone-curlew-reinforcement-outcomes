@@ -1558,9 +1558,57 @@ Social network analyses were undertaken using the STRAND package by [Ross et al.
 
 STRAND was developed for directional networks, but can be used for undirectional networks with care for inferences. 
 
+We need an exposure matrix to account for potential for interactions to occur. For this we use the total number of fixes a dyad were simultaneously tracked for. 
+
+We will calculate social networks for 2 time periods:
+
+  1) Residents only
+  2) Residents and reinforcers
+  
+Read in tracking data with contacts columns. 
+
+```{r}
+# read in contact data
+data <- read.csv("data/contact_events.csv") %>% 
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
+```
+  
+### Residents only
+
+We define this as the period from the last resident released (2023-01-16) to the first reinforcer released (2023-06-07). 
+
+```{r}
+# define resident only date period
+res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), by = "day")
+
+# subset to dates
+data_resident <- data %>%
+  filter(date %in% res_dates)
+```
+
+Create exposure matrix (i.e. simultaneous tracking events).
+
 ```{r}
 
 ```
+
+Create matrix of interactions. 
+
+```{r}
+# interaction list
+res_interact <- data %>%
+  select(c(id, contact_id, contact)) %>%
+  group_by(id, contact_id) %>%
+  summarise(contacts = sum(contact)) %>%
+  na.omit() %>%
+  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0)
+```
+
+### Residents and reinforcers
 
 
 # Statistical analysis
