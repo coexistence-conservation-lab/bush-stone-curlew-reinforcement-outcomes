@@ -1586,12 +1586,20 @@ Create matrix of interactions.
 
 ```{r}
 # interaction list
-res_interact <- data_resident %>%
+res <- data_resident %>%
   select(c(id, contact_id, contact)) %>%
   group_by(id, contact_id) %>%
   summarise(contacts = sum(contact)) %>%
   # remove NAs
-  na.omit() %>%
+  na.omit() 
+
+# summary statistics of contacts
+hist(res$contacts)
+mean(res$contacts)
+sd(res$contacts)
+
+# convert interaction to matrix
+res <- res %>%
   # add first bird to first bird comparison 
   rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
   # pivot to wide matrix
@@ -1602,11 +1610,6 @@ res_interact <- data_resident %>%
   relocate(Aurora) %>%
   # matrix
   as.matrix()
-
-# summary statictics of weights
-hist(res_interact$weight)
-mean(res_interact$weight)
-sd(res_interact$weight)
 ```
 
 Plot social network using igraph. 
@@ -1616,7 +1619,7 @@ Plot social network using igraph.
 set.seed(10) 
 
 # edge network from interaction matrix
-res_graph <- graph_from_adjacency_matrix(res_interact, mode = "undirected", diag = FALSE, weighted = TRUE)
+res_graph <- graph_from_adjacency_matrix(res, mode = "undirected", diag = FALSE, weighted = TRUE)
 
 # plot with weighted edges
 plot(res_graph, edge.width = E(res_graph)$weight/1000)
@@ -1641,59 +1644,113 @@ b <- betweenness(res_graph)
 
 # plot with weighted edges and vary node size by betweeness
 plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=b)
-
-# detect communities
-eb <- cluster_edge_betweenness(res_graph)
-length(eb)
-
-# plot communities
-plot(eb, res_graph)
 ```
 
-The network density is 87%. The network is continuous but has three communities. This aligns with my observation of the birds from the tracking data, where there was a group in zone 2 (centred on Nutmeg) and a group in zone 1 (centred on Marmalade) with Aurora floating between the two groups. 
+Opting for a walktrap community clustering method because it is weighted data, we expect hierachical, and it is a small dense community.
+
+```{r}
+# detect communities
+comm <- cluster_walktrap(res_graph)
+length(comm)
+dendPlot(comm)
+modularity(comm)
+
+# plot communities
+plot(res_graph, vertex.color=membership(comm), edge.width = E(res_graph)$weight/1000)
+```
+
+The network density is 87%. The network is continuous but has three communities (modularity 0.430). This aligns with my observation of the birds from the tracking data.
 
 ### Residents and reinforcers
 
-We define this as the period from the last resident released (2023-01-16) to the first reinforcer released (2023-06-07). 
+We define this as the period from the last reinforcer released (2023-06-11) to the end of the study period (2024-01-10). 
 
 ```{r}
-# define resident only date period
-res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), by = "day")
+# define reinforcer date period
+rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"), by = "day")
 
 # subset to dates
-data_resident <- data %>%
-  filter(date %in% res_dates)
+data_reinforce <- data %>%
+  filter(date %in% rein_dates)
 ```
 
 Create matrix of interactions. 
 
 ```{r}
 # interaction list
-res_interact <- data_resident %>%
+rein <- data_reinforce %>%
   select(c(id, contact_id, contact)) %>%
   group_by(id, contact_id) %>%
   summarise(contacts = sum(contact)) %>%
   # remove NAs
-  na.omit() %>%
+  na.omit() 
+
+# summary statistics of contacts
+hist(rein$contacts)
+mean(rein$contacts)
+sd(rein$contacts)
+
+# convert interaction to matrix
+rein <- rein %>%
   # add first bird to first bird comparison 
-  rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
+  rbind(data.frame(id = "Athena", contact_id = "Athena", contacts = 0)) %>%
   # pivot to wide matrix
   pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
   # convert bird id to row name labels
   column_to_rownames("id") %>%
   # move last column (from rbind) first
-  relocate(Aurora) %>%
+  relocate(Athena) %>%
   # matrix
   as.matrix()
-
-# summary statictics of weights
-hist(res_interact$weight)
-mean(res_interact$weight)
-sd(res_interact$weight)
 ```
 
 Plot social network using igraph. 
 
+```{r}
+# edge network from interaction matrix
+rein_graph <- graph_from_adjacency_matrix(rein, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+# add cohort metadata
+v <- data.frame(id = row.names(rein)) %>% left_join(select(metadata, c(id, cohort)))
+
+V(rein_graph)$cohort <- v[match(V(rein_graph)$name, v$id), "cohort"]
+
+# set node shape by cohort
+V(rein_graph)[V(rein_graph)$cohort == "Reinforcing"]$shape <- "square"
+V(rein_graph)[V(rein_graph)$cohort == "Resident"]$shape <- "circle"
+
+# plot with weighted edges and colour by cohort
+plot(rein_graph, edge.width = E(rein_graph)$weight/100)
+
+# detect communities
+comm <- cluster_walktrap(rein_graph)
+length(comm)
+modularity(comm)
+dendPlot(comm)
+
+# plot communities
+plot(rein_graph, vertex.color=membership(comm), edge.width = E(rein_graph)$weight/200)
+```
+
+Modularity scores for different cluster methods:
+
+  * edge betweeness: 0.087
+  * walktrap: 0.263
+  * fast greedy: 0.263
+  * optimal: 0.263
+  
+Next we calculate individual statistics for level of social integration and contribution.
+
+```{r}
+# calculate individual metrics
+metrics <- data.frame(weighted_edges = strength(rein_graph, mode = "all")) %>%
+  rownames_to_column(var = "id") %>%
+  cbind(closeness = as.numeric(closeness(rein_graph, normalized = TRUE))) %>%
+  cbind(eigenvector = as.numeric(eigen_centrality(rein_graph)$vector))
+
+# save to file
+write.csv(metrics, "results/social_metrics.csv", row.names = FALSE)
+```
 
 # Statistical analysis
 
@@ -1992,4 +2049,4 @@ The probability of survival to 54 days for residents is 87% (upper CI = 79%, low
 
 The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
 
-So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.961). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
+So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
