@@ -11,15 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, gtools, janitor, lme4, lmerTest, move2, momentuHMM, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
-
-# Extra packages for STRAND - do this once only
-## note: first installed Rtools44
-remotes::install_github("stan-dev/cmdstanr")
-cmdstanr::check_cmdstan_toolchain()
-cmdstanr::install_cmdstan()
-install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
-remotes::install_github("ctross/STRAND")
+pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, gtools, igraph, janitor, lme4, lmerTest, move2, momentuHMM, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1590,50 +1582,87 @@ data_resident <- data %>%
   filter(date %in% res_dates)
 ```
 
-Create exposure matrix (i.e. simultaneous tracking events).
+Create matrix of interactions. 
 
 ```{r}
-# list of residents
-residents <- unique(data_resident$id)
-
-# individual pairwise combinations
-list <-combinations(n = length(residents), r = 2, v = residents, repeats.allowed = TRUE)
-list1 <- list[,1]
-list2 <- list[,2]
-
-# loop through all birds to find number of points for potential interactions
-exposure <- data.frame()
-
-for(i in 1:length(list1)) {
-
-bird1 <- filter(data_resident, id == list1[i])
-bird2 <- filter(data_resident, id == list2[i])
-
-# the start time is the later of the first timestamps
-start <- max(c(min(bird1$time_local), min(bird2$time_local)))
-# the end time is the earlier of the last timestamps
-end <- min(c(max(bird1$time_local), max(bird2$time_local)))
-
-# keep smaller of the number of fixes for the birds during the shared window
-overlap <- data.frame(
-  bird1 = list1[i],
-  bird2 = list2[i],
-  overlap = as.integer(min(
-  nrow(filter(bird1, time_local > start & time_local <end)),
-  nrow(filter(bird2, time_local > start & time_local <end)))))
-
-exposure <- rbind(exposure, overlap)
-}
-
-# convert to wide matrix for STRAND
-exposure <- pivot_wider(exposure, names_from = bird2, values_from = overlap) %>%
+# interaction list
+res_interact <- data_resident %>%
+  select(c(id, contact_id, contact)) %>%
+  group_by(id, contact_id) %>%
+  summarise(contacts = sum(contact)) %>%
+  # remove NAs
+  na.omit() %>%
+  # add first bird to first bird comparison 
+  rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
+  # pivot to wide matrix
+  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
   # convert bird id to row name labels
-  column_to_rownames("bird1") %>%
+  column_to_rownames("id") %>%
+  # move last column (from rbind) first
+  relocate(Aurora) %>%
   # matrix
   as.matrix()
 
-# and fill in lower triangle with the same pairwise values
-exposure[lower.tri(exposure)] <- t(exposure)[lower.tri(exposure)]
+# summary statictics of weights
+hist(res_interact$weight)
+mean(res_interact$weight)
+sd(res_interact$weight)
+```
+
+Plot social network using igraph. 
+
+```{r}
+# set seed to keep igraph layout static
+set.seed(10) 
+
+# edge network from interaction matrix
+res_graph <- graph_from_adjacency_matrix(res_interact, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+# plot with weighted edges
+plot(res_graph, edge.width = E(res_graph)$weight/1000)
+
+# calculate edge density i.e. number of observed edges against possible edges
+edge_density(res_graph)
+
+# calculate degree centrality i.e. number of edges
+de <- degree(res_graph)
+
+# plot with weighted edges and vary node size by degree centrality
+plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=de*2)
+
+# calculate node strength i.e. the sum of the weights of edges connected to the node
+ns <- strength(res_graph)
+
+# plot with weighted edges and vary node size by node strength
+plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=ns/500)
+
+# calculate betweeness (indicator a node is influential in a network)
+b <- betweenness(res_graph)
+
+# plot with weighted edges and vary node size by betweeness
+plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=b)
+
+# detect communities
+eb <- cluster_edge_betweenness(res_graph)
+length(eb)
+
+# plot communities
+plot(eb, res_graph)
+```
+
+The network density is 87%. The network is continuous but has three communities. This aligns with my observation of the birds from the tracking data, where there was a group in zone 2 (centred on Nutmeg) and a group in zone 1 (centred on Marmalade) with Aurora floating between the two groups. 
+
+### Residents and reinforcers
+
+We define this as the period from the last resident released (2023-01-16) to the first reinforcer released (2023-06-07). 
+
+```{r}
+# define resident only date period
+res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), by = "day")
+
+# subset to dates
+data_resident <- data %>%
+  filter(date %in% res_dates)
 ```
 
 Create matrix of interactions. 
@@ -1656,26 +1685,14 @@ res_interact <- data_resident %>%
   relocate(Aurora) %>%
   # matrix
   as.matrix()
+
+# summary statictics of weights
+hist(res_interact$weight)
+mean(res_interact$weight)
+sd(res_interact$weight)
 ```
 
-Create STRAND object
-
-```{r}
-# Organize outcome & exposure measures
-outcome <- list(res_interact = res_interact)
-exposure <- list(exposure = exposure)
-
-# make strand data object
-strand_res <- make_strand_data(
-  outcome = outcome,
-  exposure = exposure,
-  outcome_mode = "poisson",
-  link_mode = "log",
-  check_data_organization = TRUE)
-```
-
-
-### Residents and reinforcers
+Plot social network using igraph. 
 
 
 # Statistical analysis
