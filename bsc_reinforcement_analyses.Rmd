@@ -1754,13 +1754,9 @@ write.csv(metrics, "results/social_metrics.csv", row.names = FALSE)
 
 # Statistical analysis
 
-## H1: social organisation
+## Comparison residents and reinforcers 
 
-## H2: effect on residents
-
-## H3: benefits for reinforcers
-
-### 3a: distance moved
+### m1: Distance moved
 
 Is there a difference between residents and reinforcers in their distance moved?
 
@@ -1831,14 +1827,14 @@ ggplot(establishment_55)+
   ylab("Daily distance moved (m)")
 
 # test whether establishment differs between the groups
-m3a <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m3a)
-anova(m3a)
+m1 <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m1)
+anova(m1)
 ```
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
 
-### 3b: roost establishment
+### m2: Roost establishment
 
 Do the cohorts differ in their roost establishment?
 
@@ -1909,16 +1905,16 @@ ggplot(establishment_55)+
   ylab("Distance between consecutive roosts (m)")
 
 # test whether establishment differs between the groups
-m3b <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m3b)
-anova(m3b)
+m2 <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m2)
+anova(m2)
 ```
 
 Settling in was more static in residents than reinforcers, who continued to move more. The resident cohort settled on fixed roosts quickly, whereas the reinforcers alternated between roosting in the central woodland and roosting on the eastern boundary. 
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more than reinforcers (estimate: -0.01104).
 
-### 3c: release stie fidelity
+### m3: Release site fidelity
 
 Does release site fidelity differ between the cohorts?
 
@@ -1988,14 +1984,96 @@ hist(establishment_55$dist_log)
 ggqqplot(establishment_55$dist_log)
 
 # test whether establishment differs between the groups
-m3c <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
-summary(m3c)
-anova(m3c)
+m3 <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
+summary(m3)
+anova(m3)
 ```
 
 We found a significant effects of elapsed time and the interaction of time and cohort on the daily distance from release site to roosts. However there was no effect of cohort alone. Both cohorts increased their distance from the release site over time, but residents did this faster than reinforcers. 
 
+### m4: Home range establishment
+
+Is there a difference between reinforcers and residents in home range size over time?
+
+Visualise daily movement to 100 days.
+
+```{r}
+# read in data
+home_range <- read.csv("data/hr_daily_area.csv") %>%
+   # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date))
+
+# filter to first 100 days
+establishment_100 <- home_range %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # filter to establishment period
+  filter(elapsed < 100)
+
+# calculate cohort means
+summary <- establishment_100 %>%
+  group_by(cohort, elapsed) %>%
+  summarise(mean_area = mean(area))
+
+# plot distance moved between roosts by cohort during establishment
+ggplot(summary)+
+  geom_path(aes(elapsed, mean_area, colour = cohort))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Mean home range size (hectares)")
+```
+
+Reinforcers initially have much large home ranges (due to the shuttle between the central woodland and the eastern fenceline) than the residents, before settling.
+
+For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
+
+```{r}
+# limit cohort daily means to 55 days (minimum period for reinforcers)
+establishment_55 <- establishment_100 %>%
+  filter(elapsed < 56)
+
+# distribution of movement data
+hist(establishment_55$area)
+ggqqplot(establishment_55$area)
+
+# correct left skew
+establishment_55 <- establishment_55 %>%
+  mutate(area_log = log(area))
+
+hist(establishment_55$area_log)
+ggqqplot(establishment_55$area_log)
+
+# plot difference between cohorts (without time)
+ggplot(establishment_55)+
+  geom_boxplot(aes(cohort, area_log))+
+  theme_bw()+
+  xlab("Cohort") + 
+  ylab("Home range area (log transformed)")
+
+# plot difference over time
+ggplot(establishment_55)+
+  geom_smooth(aes(elapsed, area, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Home range size (hectares)")
+
+# test whether establishment differs between the groups
+m4 <- lmer(area_log ~ cohort * elapsed + (1|id), data = establishment_55)
+summary(m4)
+anova(m4)
+```
+
+We found a significant effects of elapsed time and the interaction of time and cohort on the size of home ranges. Residents started with small (1ha) home ranges and gradually increased over time (to 3ha) whereas reinforcers started with large home ranges (8ha) and gradually decreased (to 6ha). 
+
+## Effect on residents pre- and post-reinforcement
+
 # Survival analysis
+
+## Reinforcers and residents
 
 Do reinforcers survive better than the residents? 
 
@@ -2050,3 +2128,46 @@ The probability of survival to 54 days for residents is 87% (upper CI = 79%, low
 The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
 
 So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
+
+## Reinforcers by social group
+
+During the social analysis step we found that post-reinforcement there were two sub-groups to the community:
+
+  1) a group with just reinforcers, and 
+  2) a blended group of all remaining residents and half the reinforcers.
+  
+I hypothesise the group with the residents would survive better because of the enhanced potential for learning. 
+
+Compare to 55 days (minimum common denominator deployment period for reinforcers).
+
+```{r}
+# social group membership
+club <- c("Rowan", "Rory", "Fauna", "Zeus", "Rocky", "Sofi", "Loki", "Avery", "Maeve")
+
+# Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
+surv_data <- metadata %>%
+  # remove columns not needed
+  dplyr::select(!c(location, abbbs, band, alive, release_year)) %>%
+  # add survival time (persistence) - right censored data
+  mutate(time = end_date - start_date) %>%
+  # add status - whether death occurs
+  mutate(status = ifelse(is.na(mortality), 0, 1)) %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "exclusive", "mixed")) %>%
+  # select only reinforcers
+  filter(cohort == "Reinforcing")
+
+# Fit a survival model by social group
+kmfit_social <- survfit(Surv(time, status) ~ social, data = surv_data)
+
+summary(kmfit_social, times = c(1,30,54))
+
+# plot
+autoplot(kmfit_social)
+
+# Fit Cox Model
+cox <- coxph(Surv(time, status) ~ social, data = surv_data)
+summary(cox)
+```
+
+No difference in survival for reinforcers of different social memberships.
