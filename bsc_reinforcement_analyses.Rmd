@@ -694,7 +694,7 @@ for(i in 1:length(birds)){
 }
 
 # save output
-write.csv(distance_daily, "data/daily_distance_moved.csv", row.names = FALSE)
+write.csv(distance_daily, "results/daily_distance_moved.csv", row.names = FALSE)
 ```
 
 Plot distance moved as a density plot and movement over time, per bird.
@@ -807,7 +807,7 @@ ggplot(data = filter(roosts, id == "Marmalade"))+
       axis.title.y=element_blank())
 
 # save daily roost locations
-write.csv(roosts, "data/daily_roost_location.csv", row.names = FALSE)
+write.csv(roosts, "results/daily_roost_location.csv", row.names = FALSE)
 ```
 
 How far between consecutive roosts? 
@@ -937,7 +937,7 @@ ggmap(map_z15)+
   theme_void()
 
 # write to file
-write.csv(distance_roosts2, "data/daily_distance_between_roosts.csv", row.names = FALSE)
+write.csv(distance_roosts2, "results/daily_distance_between_roosts.csv", row.names = FALSE)
 ```
 
 ## Release site fidelity
@@ -974,8 +974,62 @@ dist <- roosts %>%
   arrange(date) %>%
   # drop geometry
   st_drop_geometry()
+
 # save to file
-write.csv(dist, "data/daily_roost_distance_from_release.csv", row.names = FALSE)
+write.csv(dist, "results/daily_roost_distance_from_release.csv", row.names = FALSE)
+```
+
+## Home range
+
+Home range change is another way to investigate post-release behavioural modification. Previous studies have demonstrated decreasing home ranges over time as individuals first explore their new surrounds and then settle on a core area of exploitation. We define home range as 50% kernel utilisation distribution, with both nocturnal and diurnal fixes.
+
+```{r}
+# Read in cleaned data 
+data <- read.csv("data/data_cleaned.csv") %>%
+  # Time in posix format
+  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "Australia/Melbourne"),
+         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
+                                 tz = "UTC")) %>%
+  # Add date
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))%>%
+  filter(!id %in% c("Wobbles", "Star"))
+
+# set up data in spatial points dataframe
+locs <- SpatialPointsDataFrame(coordinates(
+  cbind(data$easting, data$northing)), data = data)
+
+# home range polygon per bird per day 🐢🐢 2.5 hours
+birds <- as.character(unique(data$id))
+days <- unique(locs[["date"]])
+
+hr_daily <- data.frame()
+
+for (i in 1:length(birds)){
+  for (j in 1:length(days)){
+    points <- subset(locs, id == birds[i] & date == days[j],
+                     select = id)
+    if (length(points)<5){
+      next
+    }
+    kud <- kernelUD(points[,1], h="href", grid=1000, extent = 4) %>% 
+      getverticeshr(percent = 50)
+    
+    proj4string(kud) <- CRS("EPSG:32755")
+    
+    kud_df_utm <- st_as_sf(kud)%>%
+      mutate(date = days[j])
+    
+    print(head(kud_df_utm, n= 1L))
+    
+    hr_daily <- rbind.data.frame(hr_daily, kud_df_utm)
+  }}
+
+# extract area per day i.e. drop geometry
+hr_area <- st_drop_geometry(hr_daily)
+
+# save to file
+write.csv(hr_area, "results/daily_hr_area.csv", row.names = TRUE)
 ```
 
 ## Time budget HMM
@@ -1347,77 +1401,35 @@ budget_daily <- data_hmm %>%
          state2p = state2/total,
          state3p = state3/total,
          state4p = state4/total) %>%
-  arrange(date_bird)
+  arrange(date_bird) %>%
+  # rename ID
+  rename(id = ID)
 
-# plot state2 over time
-ggplot(budget_daily)+
-  geom_path(aes(as_date(date_bird), mean(state2p)))
+# save to file
+write.csv(budget_daily, "results/daily_time_budget.csv", row.names = FALSE)
 
 # summarise over time
 budget <- budget_daily %>%
   # calculate mean and sd
-  group_by(ID) %>%
+  group_by(id) %>%
   summarise(s1m = mean(state1p),
             s2m = mean(state2p),
             s3m = mean(state3p),
-            s4m = mean(state4p),
-            s1sd = sd(state1p),
-            s2sd = sd(state2p),
-            s3sd = sd(state3p),
-            s4sd = sd(state4p))
-```
+            s4m = mean(state4p)) %>%
+  pivot_longer(2:5, names_to = "state", values_to = "budget") %>%
+  # add cohort
+  left_join(select(metadata, c(id, cohort)))
 
-## Home range
-
-Home range change is another way to investigate post-release behavioural modification. Previous studies have demonstrated decreasing home ranges over time as individuals first explore their new surrounds and then settle on a core area of exploitation. We define home range as 50% kernel utilisation distribution, with both nocturnal and diurnal fixes.
-
-```{r}
-# Read in cleaned data 
-data <- read.csv("data/data_cleaned.csv") %>%
-  # Time in posix format
-  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "Australia/Melbourne"),
-         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "UTC")) %>%
-  # Add date
-  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))%>%
-  filter(!id %in% c("Wobbles", "Star"))
-
-# set up data in spatial points dataframe
-locs <- SpatialPointsDataFrame(coordinates(
-  cbind(data$easting, data$northing)), data = data)
-
-# home range polygon per bird per day 🐢🐢 2.5 hours
-birds <- as.character(unique(data$id))
-days <- unique(locs[["date"]])
-
-hr_daily <- data.frame()
-
-for (i in 1:length(birds)){
-  for (j in 1:length(days)){
-    points <- subset(locs, id == birds[i] & date == days[j],
-                     select = id)
-    if (length(points)<5){
-      next
-    }
-    kud <- kernelUD(points[,1], h="href", grid=1000, extent = 4) %>% 
-      getverticeshr(percent = 50)
-    
-    proj4string(kud) <- CRS("EPSG:32755")
-    
-    kud_df_utm <- st_as_sf(kud)%>%
-      mutate(date = days[j])
-    
-    print(head(kud_df_utm, n= 1L))
-    
-    hr_daily <- rbind.data.frame(hr_daily, kud_df_utm)
-  }}
-
-# extract area per day i.e. drop geometry
-hr_area <- st_drop_geometry(hr_daily)
-
-# save to file
-write.csv(hr_area, "data/hr_daily_area.csv", row.names = TRUE)
+# plot time budget mean by bird
+ggplot(budget)+
+  geom_bar(aes(x = id, y = budget, fill = state), position="fill", stat="identity")+
+  theme_minimal()+
+  scale_fill_viridis_d()+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1))+
+  facet_wrap(~cohort, scales="free_x")
 ```
 
 # Conspecific interactions
@@ -1754,20 +1766,17 @@ write.csv(metrics, "results/social_metrics.csv", row.names = FALSE)
 
 # Statistical analysis
 
-## Comparison residents and reinforcers 
+## Comparison residents and reinforcers for establishment period
+
+All comparisons made for the first 55 days post-release, since this is the lowest common denominator of duration tracked for the reinforcing cohort.
 
 ### m1: Distance moved
 
 Is there a difference between residents and reinforcers in their distance moved?
 
-Visualise daily movement to 100 days.
-
 ```{r}
-# read in data
-distance_daily <- read.csv("data/daily_distance_moved.csv")
-
-# filter to establishment period
-establishment_100 <- distance_daily %>%
+# read in data and filter to establishment period
+datam1 <- read.csv("data/daily_distance_moved.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
@@ -1775,156 +1784,66 @@ establishment_100 <- distance_daily %>%
          start_date = as_date(start_date)) %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date_bird - start_date)) %>%
-  # filter to establishment period
-  filter(elapsed < 100)
+  # limit to first 55 days 
+  filter(elapsed <56)
 
-# calculate cohort means
-summary <- establishment_100 %>%
-  group_by(cohort, elapsed) %>%
-  summarise(mean_daily_dist = mean(daily_dist))
+# create cohort means
+sum1 <- datam1 %>%
+  group_by(elapsed, cohort) %>%
+  summarise(daily_dist = mean(daily_dist)) %>%
+  arrange(elapsed)
 
-# plot distance moved by cohort during establishment
-ggplot(summary)+
-  geom_path(aes(elapsed, mean_daily_dist, colour = cohort))+
-  theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-  xlab("Days post-release") + 
-  ylab("Mean daily distance moved (m)")
-```
-
-I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release. 
-
-For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
-
-```{r}
-# limit cohort daily means to 55 days (minimum period for reinforcers)
-establishment_55 <- establishment_100 %>%
-  filter(elapsed < 56)
-
-# distribution of movement data
-hist(establishment_55$daily_dist)
-ggqqplot(establishment_55$daily_dist)
-
-# correct left skew
-establishment_55 <- establishment_55 %>%
-  mutate(dist_sqrt = sqrt(daily_dist))
-
-hist(establishment_55$dist_sqrt)
-ggqqplot(establishment_55$dist_sqrt)
-
-# plot difference between cohorts (without time)
-ggplot(establishment_55)+
-  geom_boxplot(aes(cohort, daily_dist))+
-  theme_bw()+
+# plot daily distance by cohort
+ggplot(datam1)+
+  geom_boxplot(aes(cohort,daily_dist))+
+  theme_minimal()+
   xlab("Cohort") + 
-  ylab("Distance travelled per night (m)")
+  ylab("Daily distance moved (m)")
 
-# plot difference over time
-ggplot(establishment_55)+
-  geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
+# plot daily distance over time as cohort means
+ggplot(sum1)+
+  geom_path(aes(elapsed, daily_dist, color = cohort))+
   theme_minimal() +
   xlab("Days post-release") + 
   ylab("Daily distance moved (m)")
 
-# test whether establishment differs between the groups
-m1 <- lmer(dist_sqrt ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m1)
-anova(m1)
+# plot daily distance over time as linear model
+ggplot(datam1)+
+  geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Daily distance moved (m)")
 ```
 
-We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement slightly more over time than reinforcers (estimate: 0.06766), possibly because reinforcers move more from the outset
+I expected to see an initial spike in movement followed by a decrease, indicating an acclimation period - like seen in previous studies of bighorn sheep. But instead we found a gradual increase over time post-release for both groups.
+
+```{r}
+# distribution of movement data
+hist(datam1$daily_dist)
+ggqqplot(datam1$daily_dist)
+
+# correct left skew
+hist(sqrt(datam1$daily_dist))
+ggqqplot(sqrt(datam1$daily_dist))
+
+# test whether establishment differs between the groups
+m1 <- lmer(sqrt(daily_dist) ~ cohort * elapsed + (1|id), data = datam1)
+summary(m1)
+
+# check residuals
+hist(residuals(m1))
+ggqqplot(residuals(m1))
+```
+
+We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement more steeply over time than reinforcers.
 
 ### m2: Roost establishment
 
 Do the cohorts differ in their roost establishment?
 
-Visualise daily movement to 100 days.
-
 ```{r}
-# read in data
-distance_roosts <- read.csv("data/daily_distance_between_roosts.csv") %>%
-   # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
-  # format dates as dates
-  mutate(date = as_date(date),
-         start_date = as_date(start_date))
-
-# filter to first 100 days
-establishment_100 <- distance_roosts %>%
-  # calculate time since release
-  mutate(elapsed = as.numeric(date - start_date)) %>%
-  # filter to establishment period
-  filter(elapsed < 100)
-
-# calculate cohort means
-summary <- establishment_100 %>%
-  group_by(cohort, elapsed) %>%
-  summarise(mean_distance_previous = mean(distance_previous))
-
-# plot distance moved between roosts by cohort during establishment
-ggplot(summary)+
-  geom_path(aes(elapsed, mean_distance_previous, colour = cohort))+
-  theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-  xlab("Days post-release") + 
-  ylab("Mean distance moved between roosts per day (m)")
-```
-
-Distance between roosts sites might be the better indication of acclimation than daily distance moved - saw the expected initial high movement followed by settling in. 
-
-For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
-
-```{r}
-# limit cohort daily means to 55 days (minimum period for reinforcers)
-establishment_55 <- establishment_100 %>%
-  filter(elapsed < 56)
-
-# distribution of movement data
-hist(establishment_55$distance_previous)
-ggqqplot(establishment_55$distance_previous)
-
-# correct left skew
-establishment_55 <- establishment_55 %>%
-  mutate(dist_log = log(distance_previous))
-
-hist(establishment_55$dist_log)
-ggqqplot(establishment_55$dist_log)
-
-# plot difference between cohorts (without time)
-ggplot(establishment_55)+
-  geom_boxplot(aes(cohort, dist_log))+
-  theme_bw()+
-  xlab("Cohort") + 
-  ylab("Distance between consecutive roosts (log transformed)")
-
-# plot difference over time
-ggplot(establishment_55)+
-  geom_smooth(aes(elapsed, distance_previous, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
-  ylab("Distance between consecutive roosts (m)")
-
-# test whether establishment differs between the groups
-m2 <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m2)
-anova(m2)
-```
-
-Settling in was more static in residents than reinforcers, who continued to move more. The resident cohort settled on fixed roosts quickly, whereas the reinforcers alternated between roosting in the central woodland and roosting on the eastern boundary. 
-
-We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more than reinforcers (estimate: -0.01104).
-
-### m3: Release site fidelity
-
-Does release site fidelity differ between the cohorts?
-
-Visualise to 100 days.
-
-```{r}
-dist_release <- read.csv("data/daily_roost_distance_from_release.csv")
-
-# filter to first 100 days
-establishment_100 <- dist_release %>%
+# read in data and filter to establishment period
+datam2 <- read.csv("data/daily_distance_between_roosts.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
@@ -1932,142 +1851,436 @@ establishment_100 <- dist_release %>%
          start_date = as_date(start_date)) %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
-  # filter to establishment period
-  filter(elapsed < 100)
+  # limit to first 55 days 
+  filter(elapsed <56)
 
-# calculate cohort means
-summary <- establishment_100 %>%
-  group_by(cohort, elapsed) %>%
-  summarise(mean_distance_release = mean(dist_release))
+# create cohort means
+sum2 <- datam2 %>%
+  group_by(elapsed, cohort) %>%
+  summarise(distance_previous = mean(distance_previous)) %>%
+  arrange(elapsed)
 
-# plot distance moved between roosts by cohort during establishment
-ggplot(summary)+
-  geom_path(aes(elapsed, mean_distance_release, colour = cohort))+
-  theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+# plot daily roost distance by cohort
+ggplot(datam2)+
+  geom_boxplot(aes(cohort,distance_previous))+
+  theme_minimal()+
+  xlab("Cohort") + 
+  ylab("Daily distance between roosts (m)")
+
+# plot daily roost distance over time as cohort means
+ggplot(sum2)+
+  geom_path(aes(elapsed, distance_previous, color = cohort))+
+  theme_minimal() +
   xlab("Days post-release") + 
-  ylab("Mean distance between roost and release location (m)")
+  ylab("Daily distance between roosts (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+# plot daily roost distance over time as linear model
+ggplot(datam2)+
+  geom_smooth(aes(elapsed, distance_previous, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Daily distance between roosts (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
 
-The reinforcers did not move as far from the release location as the residents, who moved away and stayed away. 
-
-For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
+Distance between roosts sites might be the better indication of acclimation than daily distance moved - here we saw the expected initial high movement followed by settling in, which we didn't see for daily distance moved. This takes about 10 days in residents but only 4 in reinforcers. However, after this point the reinforcers maintain higher movement (because of switching between the two roost locations, alternating between the central woodland and the eastern boundary).
 
 ```{r}
-# limit cohort daily means to 55 days (minimum period for reinforcers)
-establishment_55 <- establishment_100 %>%
-  filter(elapsed < 56)
+# distribution of movement data
+hist(datam2$distance_previous)
+ggqqplot(datam2$distance_previous)
 
-# plot difference between cohorts (without time)
-ggplot(establishment_55)+
-  geom_boxplot(aes(cohort, dist_release))+
-  theme_bw()+
+# correct left skew
+hist(log(datam2$distance_previous))
+ggqqplot(log(datam2$distance_previous))
+
+# test whether establishment differs between the groups
+m2 <- lmer(log(distance_previous) ~ cohort * elapsed + (1|id), data = datam2)
+summary(m2)
+
+# check residuals
+hist(residuals(m2))
+ggqqplot(residuals(m2))
+```
+
+We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more steeply than reinforcers (estimate: -0.01104).
+
+### m3: Release site fidelity
+
+Does release site fidelity differ between the cohorts?
+
+```{r}
+# read in data and filter to establishment period
+datam3 <- read.csv("data/daily_roost_distance_from_release.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date)) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # limit to first 55 days 
+  filter(elapsed <56)
+
+# create cohort means
+sum3 <- datam3 %>%
+  group_by(elapsed, cohort) %>%
+  summarise(dist_release = mean(dist_release)) %>%
+  arrange(elapsed)
+
+# plot release site distance by cohort
+ggplot(datam3)+
+  geom_boxplot(aes(cohort,dist_release))+
+  theme_minimal()+
   xlab("Cohort") + 
-  ylab("Distance from release site to roost (m)")
+  ylab("Distance from release site (m)")
 
-# plot cohort mean for daily distance between roosts over time
-ggplot(establishment_55)+
+# plot release site distance over time as cohort means
+ggplot(sum3)+
+  geom_path(aes(elapsed, dist_release, color = cohort))+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Distance from release site (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+# plot release site distance over time as linear model
+ggplot(datam3)+
   geom_smooth(aes(elapsed, dist_release, color = cohort), method = "lm")+
   theme_minimal() +
   xlab("Days post-release") + 
-  ylab("Distance from release site to roost (m)")
-
-# distribution of movement data
-hist(establishment_55$dist_release)
-ggqqplot(establishment_55$dist_release)
-
-# correct right skew
-establishment_55 <- establishment_55 %>%
-  mutate(dist_log = log(dist_release))
-
-hist(establishment_55$dist_log)
-ggqqplot(establishment_55$dist_log)
-
-# test whether establishment differs between the groups
-m3 <- lmer(dist_log ~ cohort * elapsed + (1|id), data = establishment_55) 
-summary(m3)
-anova(m3)
+  ylab("Distance from release site (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
 
-We found a significant effects of elapsed time and the interaction of time and cohort on the daily distance from release site to roosts. However there was no effect of cohort alone. Both cohorts increased their distance from the release site over time, but residents did this faster than reinforcers. 
+The reinforcers did not move as far from the release location as the residents, who moved away and stayed away. The reinforcers then gradually increased their distance from the release site.
+
+```{r}
+# distribution of movement data
+hist(datam3$dist_release)
+ggqqplot(datam3$dist_release)
+
+# remove very large outliers from Nutmeg going on a couple day ventures outside
+datam3 <- filter(datam3, dist_release <3000)
+
+hist(datam3$dist_release)
+ggqqplot(datam3$dist_release)
+
+# correct left skew - still not great but a bit better
+hist(sqrt(datam3$dist_release))
+ggqqplot(sqrt(datam3$dist_release))
+
+# test whether establishment differs between the groups
+m3 <- lmer(sqrt(dist_release) ~ cohort * elapsed + (1|id), data = datam3)
+summary(m3)
+
+# check residuals - not as good as m1 and m2 but okay
+hist(residuals(m3))
+ggqqplot(residuals(m3))
+```
+
+Residents exhibit higher initial values for dist_release, but their rate of increase over time is slower than that of the baseline cohort. There is a significant difference between cohorts at time zero (+5.31, p = 0.0282).
+
+The variance for the random intercept (40.76) is more than double the residual variance (16.67). This indicates substantial between-individual variability in dist_release, consistent with a significant contribution of individual differences.
 
 ### m4: Home range establishment
 
 Is there a difference between reinforcers and residents in home range size over time?
 
-Visualise daily movement to 100 days.
-
 ```{r}
-# read in data
-home_range <- read.csv("data/hr_daily_area.csv") %>%
-   # add metadata
+# read in data and filter to establishment period
+datam4 <- read.csv("data/hr_daily_area.csv") %>%
+  # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
   # format dates as dates
   mutate(date = as_date(date),
-         start_date = as_date(start_date))
-
-# filter to first 100 days
-establishment_100 <- home_range %>%
+         start_date = as_date(start_date)) %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
-  # filter to establishment period
-  filter(elapsed < 100)
+  # limit to first 55 days 
+  filter(elapsed <56)
 
-# calculate cohort means
-summary <- establishment_100 %>%
-  group_by(cohort, elapsed) %>%
-  summarise(mean_area = mean(area))
+# create cohort means
+sum4 <- datam4 %>%
+  group_by(elapsed, cohort) %>%
+  summarise(area = mean(area)) %>%
+  arrange(elapsed)
 
-# plot distance moved between roosts by cohort during establishment
-ggplot(summary)+
-  geom_path(aes(elapsed, mean_area, colour = cohort))+
-  theme_bw()+
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
-  xlab("Days post-release") + 
-  ylab("Mean home range size (hectares)")
-```
-
-Reinforcers initially have much large home ranges (due to the shuttle between the central woodland and the eastern fenceline) than the residents, before settling.
-
-For stats test compare to 55 days (minimum common denominator deployment period for reinforcers).
-
-```{r}
-# limit cohort daily means to 55 days (minimum period for reinforcers)
-establishment_55 <- establishment_100 %>%
-  filter(elapsed < 56)
-
-# distribution of movement data
-hist(establishment_55$area)
-ggqqplot(establishment_55$area)
-
-# correct left skew
-establishment_55 <- establishment_55 %>%
-  mutate(area_log = log(area))
-
-hist(establishment_55$area_log)
-ggqqplot(establishment_55$area_log)
-
-# plot difference between cohorts (without time)
-ggplot(establishment_55)+
-  geom_boxplot(aes(cohort, area_log))+
-  theme_bw()+
+# plot home range size by cohort
+ggplot(datam4)+
+  geom_boxplot(aes(cohort, area))+
+  theme_minimal()+
   xlab("Cohort") + 
-  ylab("Home range area (log transformed)")
+  ylab("Home range (50% KUD) area (hectares)")
 
-# plot difference over time
-ggplot(establishment_55)+
+# plot home range size over time as cohort means
+ggplot(sum4)+
+  geom_path(aes(elapsed, area, color = cohort))+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+# plot home range size over time as linear model
+ggplot(datam4)+
   geom_smooth(aes(elapsed, area, color = cohort), method = "lm")+
   theme_minimal() +
   xlab("Days post-release") + 
-  ylab("Home range size (hectares)")
-
-# test whether establishment differs between the groups
-m4 <- lmer(area_log ~ cohort * elapsed + (1|id), data = establishment_55)
-summary(m4)
-anova(m4)
+  ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
 
-We found a significant effects of elapsed time and the interaction of time and cohort on the size of home ranges. Residents started with small (1ha) home ranges and gradually increased over time (to 3ha) whereas reinforcers started with large home ranges (8ha) and gradually decreased (to 6ha). 
+Reinforcers initially have much large home ranges (due to the shuttle between the central woodland and the eastern fence line) than the residents, before picking a core roost.
+
+```{r}
+# distribution of movement data
+hist(datam4$area)
+ggqqplot(datam4$area)
+
+# correct left skew
+hist(log(datam4$area))
+ggqqplot(log(datam4$area))
+
+# test whether establishment differs between the groups
+m4 <- lmer(log(area) ~ cohort * elapsed + (1|id), data = datam4)
+summary(m4)
+
+# check residuals
+hist(residuals(m4))
+ggqqplot(residuals(m4))
+```
+
+Resident home ranges during establishment are significantly smaller than reinforcers. Residents show an increase in area over time relative to reinforcers, even though the main effect of elapsed is non-significant.
+
+The divergent trend suggests differences in spatial behavior over time between the cohorts.
+
+Limited between-individual differences in baseline log-area compared to within-individual variation.
+
+### m5: Time budget
+
+Do cohorts vary in their time budget during establishment?
+
+```{r}
+# read in data and filter to establishment period
+datam5 <- 
+
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date)) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # limit to first 55 days 
+  filter(elapsed <56)
+
+# create cohort means
+sum4 <- datam4 %>%
+  group_by(elapsed, cohort) %>%
+  summarise(area = mean(area)) %>%
+  arrange(elapsed)
+
+# plot home range size by cohort
+ggplot(datam4)+
+  geom_boxplot(aes(cohort, area))+
+  theme_minimal()+
+  xlab("Cohort") + 
+  ylab("Home range (50% KUD) area (hectares)")
+
+# plot home range size over time as cohort means
+ggplot(sum4)+
+  geom_path(aes(elapsed, area, color = cohort))+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+# plot home range size over time as linear model
+ggplot(datam4)+
+  geom_smooth(aes(elapsed, area, color = cohort), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+
+## Comparison by social group for reinforcement period
+
+We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. 
+
+```{r}
+# social group membership
+club <- c("Rowan", "Rory", "Fauna", "Zeus", "Rocky", "Sofi", "Loki", "Avery", "Maeve")
+```
+
+### m6: Distance moved
+
+```{r}
+# read in data and filter to reinforcers during study period
+dist <- read.csv("data/daily_distance_moved.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date_bird = as_date(date_bird),
+         start_date = as_date(start_date)) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date_bird - start_date)) %>%
+  # filter to reinforcers
+  filter(cohort == "Reinforcing") %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "exclusive", "mixed")) %>%
+  # limit to first 55 days 
+  filter(elapsed <56)
+
+# plot daily distance over time by social group
+ggplot(dist)+
+  geom_smooth(aes(elapsed, daily_dist, color = social), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Daily distance moved (m)")
+```
+
+Visually, the mixed group seems to move further later, but test with stats.
+
+```{r}
+# distribution of movement data
+hist(dist$daily_dist)
+ggqqplot(dist$daily_dist)
+
+# test whether establishment differs between the groups
+m5a <- lmer(daily_dist ~ social * elapsed + (1|id), data = dist)
+summary(m5a)
+anova(m5a)
+```
+
+Significant effect of social group and time, but not social group alone. 
+
+What about if we compare the social groups to the residents?
+
+```{r}
+# define reinforcer date period
+rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"), by = "day")
+
+# read in data and filter to reinforcers during study period
+dist <- read.csv("data/daily_distance_moved.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # format dates as dates
+  mutate(date_bird = as_date(date_bird)) %>%
+  #limit to reinforcement period
+  filter(date_bird %in% rein_dates) %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) 
+
+# plot daily distance over time by social group
+ggplot(dist)+
+  geom_smooth(aes(date_bird, daily_dist, color = social), method = "lm")+
+  theme_minimal() +
+  ylab("Daily distance moved (m)")+
+  theme(axis.title.x=element_blank())
+
+# test whether distance moved differs between the groups
+m5b <- lmer(daily_dist ~ social + (1|id), data = dist)
+summary(m5b)
+anova(m5b)
+TukeyHSD(aov(daily_dist ~ social, data = dist))
+```
+
+The residents and exclusive reinforcer groups are significantly different, but the other pairwise comparisons do not differ. 
+
+### m7: Roost establishment
+
+```{r}
+# read in data and filter to reinforcers during study period
+roost <- read.csv("data/daily_distance_between_roosts.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort", "start_date"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date),
+         start_date = as_date(start_date)) %>%
+  # calculate time since release
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # filter to reinforcers
+  filter(cohort == "Reinforcing") %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "exclusive", "mixed")) %>%
+  # limit to first 55 days 
+  filter(elapsed <56)
+
+# calculate social group means
+summary <- roost %>%
+  group_by(social, elapsed) %>%
+  summarise(mean_dist = mean(distance_previous))
+
+# plot distance moved by cohort during establishment
+ggplot(summary)+
+  geom_path(aes(elapsed, mean_dist, colour = social))+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Days post-release") + 
+  ylab("Mean daily distance between roosts (m)")
+
+# plot again but trend instead of path
+ggplot(roost)+
+  geom_smooth(aes(elapsed, distance_previous, color = social), method = "lm")+
+  theme_minimal() +
+  xlab("Days post-release") + 
+  ylab("Distance between consecutive roosts (m)")
+```
+
+The mixed group establishes more fixed roost locations, moving less over time. 
+
+Test with stats. 
+
+```{r}
+# distribution of movement data
+hist(roost$distance_previous)
+ggqqplot(roost$distance_previous)
+
+# correct left skew
+hist(log(roost$distance_previous))
+ggqqplot(log(roost$distance_previous))
+
+# test whether establishment differs between the groups
+m6 <- lmer(log(distance_previous) ~ social * elapsed + (1|id), data = roost)
+summary(m6)
+anova(m6)
+```
+
+The social groups are significantly different (but no effect of time).
+
+What about if we compare the social groups to the residents?
+
+```{r}
+# define reinforcer date period
+rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"), by = "day")
+
+# read in data and filter to reinforcers during study period
+roost <- read.csv("data/daily_distance_between_roosts.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date)) %>%
+  #limit to reinforcement period
+  filter(date %in% rein_dates) %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) 
+
+# plot daily distance over time by social group
+ggplot(roost)+
+  geom_smooth(aes(date, distance_previous, color = social), method = "lm")+
+  theme_minimal() +
+  ylab("Daily distance moved (m)")+
+  theme(axis.title.x=element_blank())
+
+# test whether distance moved differs between the groups
+m6b <- lmer(distance_previous ~ social * scale(date) + (1|id), data = roost)
+summary(m6b)
+anova(m6b)
+TukeyHSD(aov(distance_previous ~ social, data = roost))
+```
+
 
 ## Effect on residents pre- and post-reinforcement
 
