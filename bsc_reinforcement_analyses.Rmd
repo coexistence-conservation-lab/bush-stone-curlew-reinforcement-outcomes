@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1799,15 +1799,15 @@ ggplot(datam1)+
 # plot daily distance over time as cohort means
 ggplot(sum1)+
   geom_path(aes(elapsed, daily_dist, color = cohort))+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Daily distance moved (m)")
 
 # plot daily distance over time as linear model
 ggplot(datam1)+
   geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Daily distance moved (m)")
 ```
 
@@ -1825,13 +1825,19 @@ ggqqplot(sqrt(datam1$daily_dist))
 # test whether establishment differs between the groups
 m1 <- lmer(sqrt(daily_dist) ~ cohort * elapsed + (1|id), data = datam1)
 summary(m1)
-
-# check residuals
-hist(residuals(m1))
-ggqqplot(residuals(m1))
 ```
 
 We found significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement more steeply over time than reinforcers.
+
+```{r}
+## diagnostics
+# check residuals
+hist(residuals(m1))
+ggqqplot(residuals(m1))
+
+# effects plot with points
+effect_plot(m1, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam1)
+```
 
 ### m2: Roost establishment
 
@@ -1848,7 +1854,9 @@ datam2 <- read.csv("results/daily_distance_between_roosts.csv") %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
   # limit to first 55 days 
-  filter(elapsed <56)
+  filter(elapsed <56) %>%
+  # re-level so residents are the reference group for stats
+  mutate(cohort = relevel(factor(cohort), ref = "Resident"))
 
 # create cohort means
 sum2 <- datam2 %>%
@@ -1860,22 +1868,22 @@ sum2 <- datam2 %>%
 ggplot(datam2)+
   geom_boxplot(aes(cohort,distance_previous))+
   theme_minimal()+
-  xlab("Cohort") + 
+  xlab("Cohort")+ 
   ylab("Daily distance between roosts (m)")
 
 # plot daily roost distance over time as cohort means
 ggplot(sum2)+
   geom_path(aes(elapsed, distance_previous, color = cohort))+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Daily distance between roosts (m)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 
 # plot daily roost distance over time as linear model
 ggplot(datam2)+
   geom_smooth(aes(elapsed, distance_previous, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Daily distance between roosts (m)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
@@ -1894,13 +1902,19 @@ ggqqplot(log(datam2$distance_previous))
 # test whether establishment differs between the groups
 m2 <- lmer(log(distance_previous) ~ cohort * elapsed + (1|id), data = datam2)
 summary(m2)
+```
 
+We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more steeply than reinforcers.
+
+```{r}
+## diagnostics
 # check residuals
 hist(residuals(m2))
 ggqqplot(residuals(m2))
-```
 
-We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more steeply than reinforcers (estimate: -0.01104).
+# effects plot 
+effect_plot(m2, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam2)
+```
 
 ### m3: Release site fidelity
 
@@ -1917,7 +1931,9 @@ datam3 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
   # limit to first 55 days 
-  filter(elapsed <56)
+  filter(elapsed <56) %>%
+  # re-level so residents are the reference group for stats
+  mutate(cohort = relevel(factor(cohort), ref = "Resident"))
 
 # create cohort means
 sum3 <- datam3 %>%
@@ -1929,22 +1945,22 @@ sum3 <- datam3 %>%
 ggplot(datam3)+
   geom_boxplot(aes(cohort,dist_release))+
   theme_minimal()+
-  xlab("Cohort") + 
+  xlab("Cohort")+ 
   ylab("Distance from release site (m)")
 
 # plot release site distance over time as cohort means
 ggplot(sum3)+
   geom_path(aes(elapsed, dist_release, color = cohort))+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Distance from release site (m)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 
 # plot release site distance over time as linear model
 ggplot(datam3)+
   geom_smooth(aes(elapsed, dist_release, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Distance from release site (m)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
@@ -1969,15 +1985,19 @@ ggqqplot(sqrt(datam3$dist_release))
 # test whether establishment differs between the groups
 m3 <- lmer(sqrt(dist_release) ~ cohort * elapsed + (1|id), data = datam3)
 summary(m3)
+```
 
+We found a significant effects of cohort, elapsed time, and the interaction of these on the distance from release. Residents exhibit higher initial values for dist_release, but their rate of increase over time is slower than that of the baseline cohort. There is a significant difference between cohorts at time zero.
+
+```{r}
+## diagnostics
 # check residuals - not as good as m1 and m2 but okay
 hist(residuals(m3))
 ggqqplot(residuals(m3))
+
+# effects plot 
+effect_plot(m3, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam3)
 ```
-
-Residents exhibit higher initial values for dist_release, but their rate of increase over time is slower than that of the baseline cohort. There is a significant difference between cohorts at time zero (+5.31, p = 0.0282).
-
-The variance for the random intercept (40.76) is more than double the residual variance (16.67). This indicates substantial between-individual variability in dist_release, consistent with a significant contribution of individual differences.
 
 ### m4: Home range establishment
 
@@ -1994,7 +2014,9 @@ datam4 <- read.csv("results/daily_hr_area.csv") %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
   # limit to first 55 days 
-  filter(elapsed <56)
+  filter(elapsed <56) %>%
+  # re-level so residents are the reference group for stats
+  mutate(cohort = relevel(factor(cohort), ref = "Resident"))
 
 # create cohort means
 sum4 <- datam4 %>%
@@ -2006,27 +2028,27 @@ sum4 <- datam4 %>%
 ggplot(datam4)+
   geom_boxplot(aes(cohort, area))+
   theme_minimal()+
-  xlab("Cohort") + 
+  xlab("Cohort")+ 
   ylab("Home range (50% KUD) area (hectares)")
 
 # plot home range size over time as cohort means
 ggplot(sum4)+
   geom_path(aes(elapsed, area, color = cohort))+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Home range (50% KUD) area (hectares)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 
 # plot home range size over time as linear model
 ggplot(datam4)+
   geom_smooth(aes(elapsed, area, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Home range (50% KUD) area (hectares)")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
 
-Reinforcers initially have much large home ranges (due to the shuttle between the central woodland and the eastern fence line) than the residents, before picking a core roost.
+We found a significant effects of cohort, elapsed time, and the interaction of these on home range area. Reinforcers initially have much large home ranges (due to the shuttle between the central woodland and the eastern fence line) than the residents, before picking a core roost.Reinforcers decline over time while residents increase. 
 
 ```{r}
 # distribution of movement data
@@ -2040,17 +2062,21 @@ ggqqplot(log(datam4$area))
 # test whether establishment differs between the groups
 m4 <- lmer(log(area) ~ cohort * elapsed + (1|id), data = datam4)
 summary(m4)
-
-# check residuals
-hist(residuals(m4))
-ggqqplot(residuals(m4))
 ```
 
 Resident home ranges during establishment are significantly smaller than reinforcers. Residents show an increase in area over time relative to reinforcers, even though the main effect of elapsed is non-significant.
 
 The divergent trend suggests differences in spatial behavior over time between the cohorts.
 
-Limited between-individual differences in baseline log-area compared to within-individual variation.
+```{r}
+## diagnostics
+# check residuals
+hist(residuals(m4))
+ggqqplot(residuals(m4))
+
+# effects plot 
+effect_plot(m4, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam4)
+```
 
 ### m5: Time budget
 
@@ -2067,7 +2093,9 @@ datam5 <- read.csv("results/daily_time_budget.csv") %>%
   # calculate time since release
   mutate(elapsed = as.numeric(date - start_date)) %>%
   # limit to first 55 days 
-  filter(elapsed <56)
+  filter(elapsed <56) %>%
+  # re-level so residents are the reference group for stats
+  mutate(cohort = relevel(factor(cohort), ref = "Resident"))
 
 # create cohort means
 sum5 <- datam5 %>%
@@ -2081,16 +2109,16 @@ sum5 <- datam5 %>%
 # plot state 2 allocation over time as cohort means
 ggplot(sum5)+
   geom_path(aes(elapsed, state2p, color = cohort))+
-  theme_minimal() +
+  theme_minimal()+
   xlab("Days post-release") + 
   ylab("Allocation of time to foraging effort")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 
-# plot state 2 allocationover time as linear model
+# plot state 2 allocation over time as linear model
 ggplot(datam5)+
   geom_smooth(aes(elapsed, state2p, color = cohort), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  theme_minimal()+
+  xlab("Days post-release")+ 
   ylab("Allocation of time to foraging effort")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
@@ -2109,16 +2137,57 @@ datam5 <- datam5 %>%
   mutate(state2AD = (datam5$state2p + 0.001) / 1.002)
 
 # test whether state 2 allocation differs between the groups
-m5 <- glmmTMB(state2AD ~ cohort * elapsed, data = datam5,
+m5 <- glmmTMB(state2AD ~ cohort * elapsed + (1 | id), data = datam5,
                family = beta_family(link = "logit"))
 summary(m5)
-
-# check residuals
-hist(residuals(m4))
-ggqqplot(residuals(m4))
 ```
 
-Significant effects of cohort and cohort*time. The effect of elapsed time depends on the cohort, with residents increasing more over time than reinforcers.
+Significant effects of cohort, time and their interaction. The effect of elapsed time depends on the cohort, with residents increasing more over time than reinforcers.
+
+```{r}
+## diagnostics
+# check residuals
+hist(residuals(m5))
+ggqqplot(residuals(m5))
+
+# effects plot 
+effect_plot(m5, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam5)
+```
+
+
+### multi graph
+
+Plot all these results together for ease of viewing.
+
+```{r}
+g1 <- ggplot(datam1)+
+  geom_smooth(aes(elapsed, daily_dist, color = cohort), method = "lm")+
+  theme_minimal()+
+  xlab("Days post-release")+ 
+  ylab("Daily distance moved (m)")
+
+g2 <- ggplot(datam2)+
+  geom_smooth(aes(elapsed, distance_previous, color = cohort), method = "lm")+
+  theme_minimal()+
+  xlab("Days post-release")+ 
+  ylab("Daily distance between roosts (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+g3 <- ggplot(datam3)+
+  geom_smooth(aes(elapsed, dist_release, color = cohort), method = "lm")+
+  theme_minimal()+
+  xlab("Days post-release")+ 
+  ylab("Distance from release site (m)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+g4 <- ggplot(datam4)+
+  geom_smooth(aes(elapsed, area, color = cohort), method = "lm")+
+  theme_minimal()+
+  xlab("Days post-release")+ 
+  ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
 
 ## Comparison by social group for reinforcement period
 
