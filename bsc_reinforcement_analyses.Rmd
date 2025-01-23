@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, lme4, lmerTest, move2, momentuHMM, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -2330,6 +2330,110 @@ ggqqplot(residuals(m8))
 Both mixed-reinforcer and mixed-resident groups have significantly lower dist_release compared to the exclusive group.
 
 Significant negative interactions between social group and date for both mixed-reinforcer (-3.0415, p < 0.00001) and mixed-resident (-2.6524, p < 0.00001) groups, indicating that the increase in dist_release over time is less pronounced for these groups compared to the exclusive group.
+
+### m9: Home range establishment
+
+### m10: Time budget
+
+### m11: Weight change
+
+In addition to the movement-based metrics of performance I wanted to look at health check data. Weight change post-release is a good indicator of performance, where some loss is expected but less steep decline (trending towards stability) indicates better performance.
+
+We were unable to compare residents to reinforcers for weight change because we did not have weight measurements for the six individuals released in January 2023 (backpacks fitted in the December trip and released by Mt Rothwell staff rather than me going back down there). So we can only compare reinforcers, but interested to see how the social group memberships contrast.
+
+Unlike the movement data, the study period is for 70 days because weights were taken after the 55 minimum common tracking period. 
+
+```{r}
+# read in data and clean up
+datam11 <- read_xlsx("data/healthchecks.xlsx") %>%
+  clean_names() %>%
+  rename(id = identity) %>%
+  select(id, date, weight) %>%
+  mutate(date = as_date(date)) %>%
+  # add metadata
+  left_join(select(metadata, c(id, start_date, cohort))) %>%
+  drop_na() %>%
+  # calculate elapsed time and add status
+  mutate(elapsed = as.numeric(date - start_date)) %>%
+  # keep only reinforcers
+  filter(cohort == "Reinforcing") %>%
+  # add social group membership %>%
+   mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) %>%
+  # keep only the latest pre-release values and assign to pre/post release
+  group_by(id) %>%
+  filter(elapsed > 0 | elapsed == max(elapsed[elapsed <= 0])) %>%
+  ungroup() %>%
+  mutate(status = as_factor(ifelse(elapsed > 0, "post-release", "pre-release"))) %>%
+  arrange(id) %>%
+  # filter to study period
+  filter(elapsed <70)
+
+# plot weight pre and post-release
+ggplot(datam11)+
+  geom_boxplot(aes(status, weight))+
+  theme_minimal()
+
+# plot weight pre and post release by individual, facet wrap social
+ggplot(datam11)+
+  geom_path(aes(status, weight, colour = id, group = id))+
+  theme_minimal()+
+  scale_colour_viridis_d()+
+  facet_wrap(~social)
+
+# plot weight pre and post release by social group as a linear model
+ggplot(datam11)+
+  geom_smooth(aes(status, weight, colour = social, group = social), method = "lm")+
+  theme_minimal()
+```
+
+We have pre and post data for 18 of the 20 reinforcers. All lost weight. The mixed social group declined less steeply, but started out on average lower than the exclusive group.
+
+Next I calculated the change in weight both in grams and as a proportion of starting weight (to account for variation in body sizes).
+
+```{r}
+# calculate weight change in grams and as a proportion of starting weight
+sum11 <- datam11 %>%
+  select(c(id, social, weight, status)) %>%
+  pivot_wider(names_from = status, values_from = weight) %>%
+  clean_names() %>%
+  drop_na() %>%
+  # add change columns
+  mutate(diff = pre_release - post_release,
+         proportion = diff/pre_release)
+
+# plot total weight differences by social group
+ggplot(sum11)+
+  geom_boxplot(aes(social, diff))+
+  theme_minimal()
+
+# plot proportional weight differences by social group
+ggplot(sum11)+
+  geom_boxplot(aes(social, proportion))+
+  theme_minimal()
+```
+
+Although total weight change seems on average lower in the mixed group, proportionally it does not look like a lot of difference.
+
+```{r}
+# check distribution of the difference
+hist(sum11$diff)
+ggqqplot(sum11$diff)
+
+# summary stats
+sums <- sum11 %>%
+  group_by(social) %>%
+  summarise(mean_diff = mean(diff),
+            se_diff = sd(diff, na.rm = TRUE) / sqrt(n()),
+            mean_prop = mean(proportion),
+            se_prop = sd(proportion, na.rm = TRUE) / sqrt(n()))
+
+# test whether weight change differs between the social groups
+m11 <- lm(diff ~ social, data = sum11)
+summary(m11)
+emmeans(m8, pairwise ~ social, adjust = "tukey", type = "response")
+```
+
+There is no significant differences between groups for weight loss.
 
 ## Effect on residents pre- and post-reinforcement
 
