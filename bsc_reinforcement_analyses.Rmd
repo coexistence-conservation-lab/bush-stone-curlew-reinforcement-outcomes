@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidyterra, tidyverse, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggraph, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1438,7 +1438,7 @@ The key issue addressed in this paper is whether social interaction occurs betwe
 
 ## Proximity anaysis
 
-First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. Given we have a large dataset we elected to use contact analysis in wildlifeDI.  
+First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. The dynamic interaction (DI) index takes into account cohesiveness of movement, giving a statistic between zero (little cohesiveness) and one (cohesivenss). However DI is irrespective of distance, so proximity should first be considered.
 
 To determine the temporal interaction threshold we use the mean sampling rate.
 
@@ -1476,7 +1476,7 @@ First format tracks as move2 objects for use in wildlifeDI.
 move <- mt_as_move2(data, coords = c("easting", "northing"), time_column = "time_local", track_id_column = "id") %>%
   # add crs
   sf::st_set_crs("EPSG:32755") %>%
-  # needed to omit NAs for conProcess to work
+  # needed to omit NAs for wildlifeDI to work
   na.omit()
 ```
 
@@ -1496,65 +1496,55 @@ dcPlot(move_subset,tc=4*60,dmax=100)
 
 The majority of contacts took place <40m apart. I'll retain the expert guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty of 20m (on cleaned data).
 
-```{r}
-# calculate proximity contact events 🐢🐢🐢 ran overnight 
-contacts <- conProcess(move,dc=30,tc=4*60)
+We calculate the Prox and DI statistics for all pairs for the two time periods of interest:
 
-# ratio of contact to non-contact events 
-table(contacts$contact)
-```
+  1) Residents only
+  2) Residents and reinforcers
+  
+### Residents only
 
-A total of 349409  contacts have been identified in the track, that is 47% of fixes
-
-Next we find periods of continuous contact and calculate some summary statistics about these interactions.
+We define this as the period from the last resident released (2023-01-16) to the first reinforcer released (2023-06-07). 
 
 ```{r}
-# find periods of continous interaction, defined as within 1 hour
-contact_period <- conPhase(contacts, pc=60*60)
+# define resident only date period
+res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), by = "day")
 
-# calculate summary statistics about interaction durations
-contact_summary <- contact_period %>%
-  sf::st_drop_geometry() %>%
-  filter(!is.na(contact_pha)) %>%
-  group_by(contact_pha) %>%
-  summarise(nfix = n(),
-            t1 = min(time_local),
-            t2 = max(time_local),
-            duration = as.numeric(
-              difftime(max(time_local), min(time_local), units = "mins")),
-            avg_d = mean(contact_d,na.rm=T),
-            min_d = min(contact_d,na.rm=T),
-            max_d = max(contact_d,na.rm=T))
+# subset to dates
+data_resident <- move %>%
+  filter(date %in% res_dates)
 
-# histogram contact distances
-hist(contact_summary$avg_d)
+# list of residents
+residents <- unique(data_resident$id)
 
-# histogram contact durations
-hist(contact_summary$duration)
+# All bird combinations
+list <-combinations(n = 13, r = 2, v = residents, repeats.allowed = FALSE)
+list1 <- list[,1]
+list2 <- list[,2]
 
-# histogram number of contacts
-hist(contacts$contact_n)
+# Calculate interactions between all birds 🐢🐢
+interact <- data.frame()
+
+for(i in 1:length(list1)) {
+  
+  bird1 <- filter(data_resident, id == list1[i])
+  bird2 <- filter(data_resident, id == list2[i])
+  
+  temp <- tryCatch({
+    data.frame(
+      prox = Prox(bird1, bird2, tc=4*60, dc=30),
+      di = DI(bird1, bird2, tc=4*60),
+      bird1 = list1[i],
+      bird2 = list2[i]) 
+  }, error = function(e) data.frame(iab = NA, bird1 = NA, bird2 = NA)) 
+  
+  print(paste("Finished", list1[i], "&", list2[i], i, "of 78", sep = " "))
+  
+  interact <- rbind(interact, temp)
+}
+
 ```
 
-15m seems to be the average distance of an interaction - which makes me confident in the distance parameter of 30m. 
 
-Most interactions were 0-8 hours.The longest interaction was 70 hours!
-
-Format and save.
-
-```{r}
-# geometry to columns
-contact2 <- contact_period %>%
-  mutate(easting = sf::st_coordinates(.)[,1],
-         northing = sf::st_coordinates(.)[,2]) %>%
-  # drop geometry
-  sf::st_drop_geometry() %>%
-  # as data frame
-  as.data.frame()
-
-# save output
-write.csv(contact2, "data/contact_events.csv", row.names = FALSE)
-```
 
 ## Social network
   
@@ -1586,6 +1576,9 @@ res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), 
 # subset to dates
 data_resident <- data %>%
   filter(date %in% res_dates)
+
+# list of residents
+residents <- unique(data_resident$id)
 ```
 
 Create matrix of interactions. 
@@ -1603,6 +1596,7 @@ res <- data_resident %>%
 hist(res$contacts)
 mean(res$contacts)
 sd(res$contacts)
+summary(res$contacts)
 
 # convert interaction to matrix
 res <- res %>%
@@ -1618,12 +1612,50 @@ res <- res %>%
   as.matrix()
 ```
 
-Plot social network using igraph. 
+And matrix of potential interactions (overlap periods)
 
 ```{r}
-# set seed to keep igraph layout static
-set.seed(10) 
+# individual pairwise combinations
+list <-permutations(n = 13, r = 2, v = residents, set = TRUE, repeats.allowed = FALSE)
+list1 <- list[,1]
+list2 <- list[,2]
 
+# loop through all birds to find number of points for potential interactions
+exposure <- data.frame()
+for(i in 1:length(list1)) {
+bird1 <- filter(data_resident, id == list1[i])
+bird2 <- filter(data_resident, id == list2[i])
+
+# the start time is the later of the first timestamps
+start <- max(c(min(bird1$time_local), min(bird2$time_local)))
+
+# the end time is the earlier of the last timestamps
+end <- min(c(max(bird1$time_local), max(bird2$time_local)))
+
+# keep smaller of the number of fixes for the birds during the shared window
+overlap <- data.frame(
+  id = list1[i],
+  contact_id = list2[i],
+  overlap = as.integer(min(
+  nrow(filter(bird1, time_local > start & time_local <end)),
+  nrow(filter(bird2, time_local > start & time_local <end)))))
+exposure <- rbind(exposure, overlap)
+}
+```
+
+Calculate association indices i.e., contacts divided by total number of potential interactions.
+
+```{r}
+# add overlap data to contact table
+res_assoc <- left_join(res, exposure) %>%
+  # calculate assocation
+  mutate(association = contacts/overlap)
+```
+
+
+Calculate social network stats using igraph.
+
+```{r}
 # edge network from interaction matrix
 res_graph <- graph_from_adjacency_matrix(res, mode = "undirected", diag = FALSE, weighted = TRUE)
 
@@ -1661,11 +1693,65 @@ length(comm)
 dendPlot(comm)
 modularity(comm)
 
-# plot communities
-plot(res_graph, vertex.color=membership(comm), edge.width = E(res_graph)$weight/1000)
+# plot communities with weighted edges and vary node size by node strength
+plot(res_graph, vertex.color=membership(comm),
+     edge.width = E(res_graph)$weight/1000,
+     vertex.label = NA,
+     layout=layout_with_fr,
+     vertex.size=ns/1000)
 ```
 
 The network density is 87%. The network is continuous but has three communities (modularity 0.430). This aligns with my observation of the birds from the tracking data.
+
+Plot using ggraph for more versatile aesthetic options.
+
+```{r}
+# convert from igraph to tidygraph
+res_tidy <- as_tbl_graph(res_graph) %>%
+  mutate(centrality = as.numeric(centrality_degree(mode = 'in')),
+         membership = as.factor(group_walktrap(weights = weight)))
+
+# plot with ggraph
+ggraph(res_tidy, layout = "fr") + 
+  geom_edge_fan(aes(alpha = weight, linewidth = weight*0.05), show.legend = FALSE) + 
+  geom_node_point(aes(colour = membership, size = centrality), show.legend = FALSE) +
+  theme_void()
+```
+
+Seeing what happens if I scale the weights and remove very small values since the range is 1-5000 for contacts
+
+```{r}
+# convert interaction to matrix
+res2 <- data_resident %>%
+  select(c(id, contact_id, contact)) %>%
+  group_by(id, contact_id) %>%
+  summarise(contacts = sum(contact)) %>%
+  # remove NAs
+  na.omit()  %>%
+  # remove values <100 - this is the crucial difference
+  filter(contacts >100) %>%
+  # scale contacts 
+  mutate(contacts = contacts/1000) %>%
+  # add first bird to first bird comparison 
+  rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
+  # pivot to wide matrix
+  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
+  # convert bird id to row name labels
+  column_to_rownames("id") %>%
+  # move last column (from rbind) first
+  relocate(Aurora) %>%
+  # matrix
+  as.matrix()
+
+# edge network from interaction matrix
+res_graph <- graph_from_adjacency_matrix(res2, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+# plot with weighted edges
+plot(res_graph, edge.width = E(res_graph)$weight)
+
+comm <- cluster_walktrap(res_graph)
+```
+
 
 ### Residents and reinforcers
 
@@ -1728,6 +1814,9 @@ V(rein_graph)[V(rein_graph)$cohort == "Resident"]$shape <- "circle"
 # plot with weighted edges and colour by cohort
 plot(rein_graph, edge.width = E(rein_graph)$weight/100)
 
+# calculate node strength i.e. the sum of the weights of edges connected to the node
+ns <- strength(rein_graph)
+
 # detect communities
 comm <- cluster_walktrap(rein_graph)
 length(comm)
@@ -1735,7 +1824,12 @@ modularity(comm)
 dendPlot(comm)
 
 # plot communities
-plot(rein_graph, vertex.color=membership(comm), edge.width = E(rein_graph)$weight/200)
+plot(rein_graph,
+     vertex.label = NA,
+     layout=layout_with_fr,
+     vertex.size=ns/600,
+     vertex.color=membership(comm), 
+     edge.width = E(rein_graph)$weight/200)
 ```
 
 Modularity scores for different cluster methods:
@@ -1829,6 +1923,8 @@ summary(m1)
 
 We found significant effects of cohort, elapsed time, and the interaction of these on the daily distance moved. Residents changed their movement more steeply over time than reinforcers.
 
+Reinforcers moved significantly further per night than residents (estimate = 4.287, SE = 1.940, t = 2.210, P = 0.033). Both cohorts travelled further with additional time post-release (estimate = 0.223, SE = 0.021, t = 10.818, P < 0.001) but the rate of increase was steeper for residents (estimate = 0.068, SE = 0.027, t = -2.531, P = 0.012).
+
 ```{r}
 ## diagnostics
 # check residuals
@@ -1905,6 +2001,8 @@ summary(m2)
 ```
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the daily distance between roosts. Both cohorts decreased their movement over time, but residents decreased more steeply than reinforcers.
+
+Reinforcers moved significantly further between consecutive roosts than residents (estimate = 0.412, SE = 0.157, t = 2.620, P = 0.010). Both cohorts decreased the distance between roosts over time (estimate = -0.023, SE = 0.003, t = -7.229, P < 0.001) but the rate of decline was steeper for residents (estimate = -0.011, SE = 0.004, t = 2.665, P = 0.008). Additionally, reinforcers settled in more quickly than residents; the initial spike and decline in movement between roosts took four days to stabilise in the reinforcing cohort and eleven days in the resident cohort. 
 
 ```{r}
 ## diagnostics
@@ -1989,6 +2087,8 @@ summary(m3)
 
 We found a significant effects of cohort, elapsed time, and the interaction of these on the distance from release. Residents exhibit higher initial values for dist_release, but their rate of increase over time is slower than that of the baseline cohort. There is a significant difference between cohorts at time zero.
 
+Reinforcers moved significantly shorter distances from the release site compared to residents (estimate = -5.306, SE = 2.310, t = -2.297, P = 0.028). Both cohorts moved further away from the release site increased with additional time post-release (estimate = 0.023, SE = 0.010, t = 2.425, P = 0.015) but the rate of increase was steeper for the reinforcers (estimate = 0.084, SE = 0.013, t = 6.656, P < 0.001). There was a significant difference between cohorts at time zero (p = 0.0282), where residents immediately moved further from the release site (average 221m further than reinforcers).
+
 ```{r}
 ## diagnostics
 # check residuals - not as good as m1 and m2 but okay
@@ -2068,6 +2168,8 @@ Resident home ranges during establishment are significantly smaller than reinfor
 
 The divergent trend suggests differences in spatial behavior over time between the cohorts.
 
+Reinforcers had significantly larger home ranges than residents (estimate = 1.926, SE = 0.190, t = 10.143, P < 0.001). Home range area increased significantly with time (estimate = 0.0224, SE = 0.0024, t = 9.372, P < 0.001). However, this relationship was moderated by cohort status: while residents showed a continued increase in area over time, reinforcers exhibited a slight decline in area over time (estimate = -0.0220, SE = 0.0031, t = -7.102, P < 0.001), suggesting a divergence in the trajectories between cohorts.
+
 ```{r}
 ## diagnostics
 # check residuals
@@ -2144,6 +2246,8 @@ summary(m5)
 
 Significant effects of cohort, time and their interaction. The effect of elapsed time depends on the cohort, with residents increasing more over time than reinforcers.
 
+Reinforcers allocated significantly more time to the foraging state than residents (estimate = 0.372, SE = 0.098, z = 3.791, P < 0.001). 
+
 ```{r}
 ## diagnostics
 # check residuals
@@ -2153,7 +2257,6 @@ ggqqplot(residuals(m5))
 # effects plot 
 effect_plot(m5, elapsed, partial.residuals = TRUE, interval = TRUE, facet.by = cohort, data = datam5)
 ```
-
 
 ### multi graph
 
@@ -2185,6 +2288,13 @@ g4 <- ggplot(datam4)+
   theme_minimal()+
   xlab("Days post-release")+ 
   ylab("Home range (50% KUD) area (hectares)")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
+
+g5 <- ggplot(datam5)+
+  geom_smooth(aes(elapsed, state2p, color = cohort), method = "lm")+
+  theme_minimal()+
+  xlab("Days post-release")+ 
+  ylab("Allocation of time to foraging effort")+
   scale_x_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
 
@@ -2548,7 +2658,7 @@ Now compare cohorts
 # Fit a survival model by cohort
 kmfit_cohort <- survfit(Surv(time, status) ~ cohort, data = surv_data)
 
-summary(kmfit_cohort, times = c(1,30,54))
+summary(kmfit_cohort, times = c(1,30,55))
 
 # plot
 autoplot(kmfit_cohort)
@@ -2558,9 +2668,9 @@ cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
 summary(cox)
 ```
 
-The probability of survival to 54 days for residents is 87% (upper CI = 79%, lower CI = 71%). 
+The probability of survival to 54 days for residents is 88% (upper CI = 100%, lower CI = 71%). 
 
-The probability of survival to 54 days for reinforcers is 95% (upper CI = 79%, lower CI = 86%). 
+The probability of survival to 54 days for reinforcers is 95% (upper CI = 100%, lower CI = 86%). 
 
 So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
 
