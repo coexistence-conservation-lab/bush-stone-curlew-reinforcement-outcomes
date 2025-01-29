@@ -1438,7 +1438,7 @@ The key issue addressed in this paper is whether social interaction occurs betwe
 
 ## Proximity anaysis
 
-First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. The dynamic interaction (DI) index takes into account cohesiveness of movement, giving a statistic between zero (little cohesiveness) and one (cohesivenss). However DI is irrespective of distance, so proximity should first be considered.
+First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. I elected to use the coefficient of association because it produces few few I errors, owing to its simplicity ([Long et al 2014](https://besjournals.onlinelibrary.wiley.com/doi/10.1111/1365-2656.12198)) 
 
 To determine the temporal interaction threshold we use the mean sampling rate.
 
@@ -1513,6 +1513,17 @@ res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), 
 data_resident <- move %>%
   filter(date %in% res_dates)
 
+# Test for a single dyad
+dyad <- filter(data_resident, id %in% c("Aurora", "Briar"))
+
+checkTO(dyad)
+
+test <- Ca(dyad, tc=4*60, dc=30);Sys.time()
+```
+
+The test dyad took 47 seconds so I'm anticipating the full set of 78 interactions will take 1 hour. 
+
+```{r}
 # list of residents
 residents <- unique(data_resident$id)
 
@@ -1526,232 +1537,20 @@ interact <- data.frame()
 
 for(i in 1:length(list1)) {
   
-  bird1 <- filter(data_resident, id == list1[i])
-  bird2 <- filter(data_resident, id == list2[i])
+  dyad <- filter(data_resident, id %in% c(list1[i], list2[i]))
   
   temp <- tryCatch({
-    data.frame(
-      prox = Prox(bird1, bird2, tc=4*60, dc=30),
-      di = DI(bird1, bird2, tc=4*60),
-      bird1 = list1[i],
-      bird2 = list2[i]) 
-  }, error = function(e) data.frame(iab = NA, bird1 = NA, bird2 = NA)) 
+    data.frame(Ca(dyad, tc=4*60, dc=30)) 
+  }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
   
   print(paste("Finished", list1[i], "&", list2[i], i, "of 78", sep = " "))
   
   interact <- rbind(interact, temp)
 }
 
+# save to disk
+write.csv(interact, "results/association_residents.csv", row.names = FALSE)
 ```
-
-
-
-## Social network
-  
-We investigate social networks for 2 time periods:
-
-  1) Residents only
-  2) Residents and reinforcers
-  
-Read in tracking data with contacts columns. 
-
-```{r}
-# read in contact data
-data <- read.csv("data/contact_events.csv") %>% 
-  # Time in posix format
-  mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "Australia/Melbourne")) %>%
-  # Add date
-  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
-```
-  
-### Residents only
-
-We define this as the period from the last resident released (2023-01-16) to the first reinforcer released (2023-06-07). 
-
-```{r}
-# define resident only date period
-res_dates <- seq.Date(from = as_date("2023-01-16"), to = as_date("2023-06-06"), by = "day")
-
-# subset to dates
-data_resident <- data %>%
-  filter(date %in% res_dates)
-
-# list of residents
-residents <- unique(data_resident$id)
-```
-
-Create matrix of interactions. 
-
-```{r}
-# interaction list
-res <- data_resident %>%
-  select(c(id, contact_id, contact)) %>%
-  group_by(id, contact_id) %>%
-  summarise(contacts = sum(contact)) %>%
-  # remove NAs
-  na.omit() 
-
-# summary statistics of contacts
-hist(res$contacts)
-mean(res$contacts)
-sd(res$contacts)
-summary(res$contacts)
-
-# convert interaction to matrix
-res <- res %>%
-  # add first bird to first bird comparison 
-  rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
-  # pivot to wide matrix
-  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
-  # convert bird id to row name labels
-  column_to_rownames("id") %>%
-  # move last column (from rbind) first
-  relocate(Aurora) %>%
-  # matrix
-  as.matrix()
-```
-
-And matrix of potential interactions (overlap periods)
-
-```{r}
-# individual pairwise combinations
-list <-permutations(n = 13, r = 2, v = residents, set = TRUE, repeats.allowed = FALSE)
-list1 <- list[,1]
-list2 <- list[,2]
-
-# loop through all birds to find number of points for potential interactions
-exposure <- data.frame()
-for(i in 1:length(list1)) {
-bird1 <- filter(data_resident, id == list1[i])
-bird2 <- filter(data_resident, id == list2[i])
-
-# the start time is the later of the first timestamps
-start <- max(c(min(bird1$time_local), min(bird2$time_local)))
-
-# the end time is the earlier of the last timestamps
-end <- min(c(max(bird1$time_local), max(bird2$time_local)))
-
-# keep smaller of the number of fixes for the birds during the shared window
-overlap <- data.frame(
-  id = list1[i],
-  contact_id = list2[i],
-  overlap = as.integer(min(
-  nrow(filter(bird1, time_local > start & time_local <end)),
-  nrow(filter(bird2, time_local > start & time_local <end)))))
-exposure <- rbind(exposure, overlap)
-}
-```
-
-Calculate association indices i.e., contacts divided by total number of potential interactions.
-
-```{r}
-# add overlap data to contact table
-res_assoc <- left_join(res, exposure) %>%
-  # calculate assocation
-  mutate(association = contacts/overlap)
-```
-
-
-Calculate social network stats using igraph.
-
-```{r}
-# edge network from interaction matrix
-res_graph <- graph_from_adjacency_matrix(res, mode = "undirected", diag = FALSE, weighted = TRUE)
-
-# plot with weighted edges
-plot(res_graph, edge.width = E(res_graph)$weight/1000)
-
-# calculate edge density i.e. number of observed edges against possible edges
-edge_density(res_graph)
-
-# calculate degree centrality i.e. number of edges
-de <- degree(res_graph)
-
-# plot with weighted edges and vary node size by degree centrality
-plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=de*2)
-
-# calculate node strength i.e. the sum of the weights of edges connected to the node
-ns <- strength(res_graph)
-
-# plot with weighted edges and vary node size by node strength
-plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=ns/500)
-
-# calculate betweeness (indicator a node is influential in a network)
-b <- betweenness(res_graph)
-
-# plot with weighted edges and vary node size by betweeness
-plot(res_graph, edge.width = E(res_graph)$weight/1000, vertex.size=b)
-```
-
-Opting for a walktrap community clustering method because it is weighted data, we expect hierachical, and it is a small dense community.
-
-```{r}
-# detect communities
-comm <- cluster_walktrap(res_graph)
-length(comm)
-dendPlot(comm)
-modularity(comm)
-
-# plot communities with weighted edges and vary node size by node strength
-plot(res_graph, vertex.color=membership(comm),
-     edge.width = E(res_graph)$weight/1000,
-     vertex.label = NA,
-     layout=layout_with_fr,
-     vertex.size=ns/1000)
-```
-
-The network density is 87%. The network is continuous but has three communities (modularity 0.430). This aligns with my observation of the birds from the tracking data.
-
-Plot using ggraph for more versatile aesthetic options.
-
-```{r}
-# convert from igraph to tidygraph
-res_tidy <- as_tbl_graph(res_graph) %>%
-  mutate(centrality = as.numeric(centrality_degree(mode = 'in')),
-         membership = as.factor(group_walktrap(weights = weight)))
-
-# plot with ggraph
-ggraph(res_tidy, layout = "fr") + 
-  geom_edge_fan(aes(alpha = weight, linewidth = weight*0.05), show.legend = FALSE) + 
-  geom_node_point(aes(colour = membership, size = centrality), show.legend = FALSE) +
-  theme_void()
-```
-
-Seeing what happens if I scale the weights and remove very small values since the range is 1-5000 for contacts
-
-```{r}
-# convert interaction to matrix
-res2 <- data_resident %>%
-  select(c(id, contact_id, contact)) %>%
-  group_by(id, contact_id) %>%
-  summarise(contacts = sum(contact)) %>%
-  # remove NAs
-  na.omit()  %>%
-  # remove values <100 - this is the crucial difference
-  filter(contacts >100) %>%
-  # scale contacts 
-  mutate(contacts = contacts/1000) %>%
-  # add first bird to first bird comparison 
-  rbind(data.frame(id = "Aurora", contact_id = "Aurora", contacts = 0)) %>%
-  # pivot to wide matrix
-  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
-  # convert bird id to row name labels
-  column_to_rownames("id") %>%
-  # move last column (from rbind) first
-  relocate(Aurora) %>%
-  # matrix
-  as.matrix()
-
-# edge network from interaction matrix
-res_graph <- graph_from_adjacency_matrix(res2, mode = "undirected", diag = FALSE, weighted = TRUE)
-
-# plot with weighted edges
-plot(res_graph, edge.width = E(res_graph)$weight)
-
-comm <- cluster_walktrap(res_graph)
-```
-
 
 ### Residents and reinforcers
 
@@ -1762,95 +1561,47 @@ We define this as the period from the last reinforcer released (2023-06-11) to t
 rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"), by = "day")
 
 # subset to dates
-data_reinforce <- data %>%
+data_reinforce <- move %>%
   filter(date %in% rein_dates)
-```
 
-Create matrix of interactions. 
+# list of founders
+founders <- unique(data_reinforce$id)
 
-```{r}
-# interaction list
-rein <- data_reinforce %>%
-  select(c(id, contact_id, contact)) %>%
-  group_by(id, contact_id) %>%
-  summarise(contacts = sum(contact)) %>%
-  # remove NAs
-  na.omit() 
+# All bird combinations
+list <-combinations(n = 28, r = 2, v = founders, repeats.allowed = FALSE)
+list1 <- list[,1]
+list2 <- list[,2]
 
-# summary statistics of contacts
-hist(rein$contacts)
-mean(rein$contacts)
-sd(rein$contacts)
+# Calculate interactions between all birds 🐢🐢
+interact <- data.frame()
 
-# convert interaction to matrix
-rein <- rein %>%
-  # add first bird to first bird comparison 
-  rbind(data.frame(id = "Athena", contact_id = "Athena", contacts = 0)) %>%
-  # pivot to wide matrix
-  pivot_wider(names_from = contact_id, values_from = contacts, values_fill = 0) %>%
-  # convert bird id to row name labels
-  column_to_rownames("id") %>%
-  # move last column (from rbind) first
-  relocate(Athena) %>%
-  # matrix
-  as.matrix()
-```
-
-Plot social network using igraph. 
-
-```{r}
-# edge network from interaction matrix
-rein_graph <- graph_from_adjacency_matrix(rein, mode = "undirected", diag = FALSE, weighted = TRUE)
-
-# add cohort metadata
-v <- data.frame(id = row.names(rein)) %>% left_join(select(metadata, c(id, cohort)))
-
-V(rein_graph)$cohort <- v[match(V(rein_graph)$name, v$id), "cohort"]
-
-# set node shape by cohort
-V(rein_graph)[V(rein_graph)$cohort == "Reinforcing"]$shape <- "square"
-V(rein_graph)[V(rein_graph)$cohort == "Resident"]$shape <- "circle"
-
-# plot with weighted edges and colour by cohort
-plot(rein_graph, edge.width = E(rein_graph)$weight/100)
-
-# calculate node strength i.e. the sum of the weights of edges connected to the node
-ns <- strength(rein_graph)
-
-# detect communities
-comm <- cluster_walktrap(rein_graph)
-length(comm)
-modularity(comm)
-dendPlot(comm)
-
-# plot communities
-plot(rein_graph,
-     vertex.label = NA,
-     layout=layout_with_fr,
-     vertex.size=ns/600,
-     vertex.color=membership(comm), 
-     edge.width = E(rein_graph)$weight/200)
-```
-
-Modularity scores for different cluster methods:
-
-  * edge betweeness: 0.087
-  * walktrap: 0.263
-  * fast greedy: 0.263
-  * optimal: 0.263
+for(i in 1:length(list1)) {
   
-Next we calculate individual statistics for level of social integration and contribution.
+  dyad <- filter(data_reinforce, id %in% c(list1[i], list2[i]))
+  
+  temp <- tryCatch({
+    data.frame(Ca(dyad, tc=4*60, dc=30))
+  }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
+  
+  print(paste("Finished", list1[i], "&", list2[i], i, "of 378", sep = " "))
+  
+  interact <- rbind(interact, temp)
+}
 
-```{r}
-# calculate individual metrics
-metrics <- data.frame(weighted_edges = strength(rein_graph, mode = "all")) %>%
-  rownames_to_column(var = "id") %>%
-  cbind(closeness = as.numeric(closeness(rein_graph, normalized = TRUE))) %>%
-  cbind(eigenvector = as.numeric(eigen_centrality(rein_graph)$vector))
-
-# save to file
-write.csv(metrics, "results/social_metrics.csv", row.names = FALSE)
+# save to disk
+write.csv(interact, "results/association_reinforcers.csv", row.names = FALSE)
 ```
+
+
+## Social network
+
+For social network analysis we follow [Farine & Whitehead 2015](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.12418) where the edges are the proximity metrics calculated above. Proximity networks are inferred interactions but with a highly complete data set - so trade-off temporal resolution with little information on any one interaction. 
+
+We use the packages tidygraph for network diagrams and asnipe to implement animal social network analysis.
+
+### Residents only
+
+### Residents and reinforcers
 
 # Statistical analysis
 
