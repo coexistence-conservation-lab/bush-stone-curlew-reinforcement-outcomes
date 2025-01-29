@@ -1540,7 +1540,8 @@ for(i in 1:length(list1)) {
   dyad <- filter(data_resident, id %in% c(list1[i], list2[i]))
   
   temp <- tryCatch({
-    data.frame(Ca(dyad, tc=4*60, dc=30)) 
+    data.frame(Prox(dyad, tc=4*60, dc=30)) %>%
+      clean_names()
   }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
   
   print(paste("Finished", list1[i], "&", list2[i], i, "of 78", sep = " "))
@@ -1554,7 +1555,7 @@ write.csv(interact, "results/association_residents.csv", row.names = FALSE)
 
 ### Residents and reinforcers
 
-We define this as the period from the last reinforcer released (2023-06-11) to the end of the study period (2024-01-10). 
+We define this as the period from the last reinforcer released (2023-06-11) to the end of the study period (2024-01-10). Each dyad takes approx. 12 seconds so all 378 takes <2 hours to run. 
 
 ```{r}
 # define reinforcer date period
@@ -1580,7 +1581,8 @@ for(i in 1:length(list1)) {
   dyad <- filter(data_reinforce, id %in% c(list1[i], list2[i]))
   
   temp <- tryCatch({
-    data.frame(Ca(dyad, tc=4*60, dc=30))
+    data.frame(Ca(dyad, tc=4*60, dc=30)) %>%
+      clean_names()
   }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
   
   print(paste("Finished", list1[i], "&", list2[i], i, "of 378", sep = " "))
@@ -1589,7 +1591,7 @@ for(i in 1:length(list1)) {
 }
 
 # save to disk
-write.csv(interact, "results/association_reinforcers.csv", row.names = FALSE)
+write.csv(interact, "results/prox_reinforcers.csv", row.names = FALSE)
 ```
 
 
