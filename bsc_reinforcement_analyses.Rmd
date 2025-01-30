@@ -1567,9 +1567,22 @@ for(i in 1:length(list1)) {
   interact <- rbind(interact, temp)
 }
 
+# tidy up the output
+interact2 <- interact %>%
+  # remove unneeded columns
+  select(id1, id2, prox) %>%
+  # format prox numeric to 4 decimal places
+  mutate(prox = as.numeric(format(round(prox, 4), nsmall = 4)))
+
 # save to disk
-write.csv(interact, "results/association_residents.csv", row.names = FALSE)
+write.csv(interact, "results/proximity_residents.csv", row.names = FALSE)
+
+# summary statistics prox values
+hist(interact2$prox)
+summary(interact2$prox)
 ```
+
+Mean proximity score is 13.9%, min is no interaction and max is 72.4%. 
 
 ### Residents and reinforcers
 
@@ -1608,10 +1621,22 @@ for(i in 1:length(list1)) {
   interact <- rbind(interact, temp)
 }
 
+# tidy up the output
+interact2 <- interact %>%
+  # remove unneeded columns
+  select(id1, id2, prox) %>%
+  # format prox numeric to 4 decimal places
+  mutate(prox = as.numeric(format(round(prox, 4), nsmall = 4)))
+
 # save to disk
-write.csv(interact, "results/prox_reinforcers.csv", row.names = FALSE)
+write.csv(interact2, "results/proximity_reinforcers.csv", row.names = FALSE)
+
+# summary statistics prox values
+hist(interact2$prox)
+summary(interact2$prox)
 ```
 
+Summary stats here
 
 ## Social network
 
@@ -1622,8 +1647,16 @@ We use the packages tidygraph for network diagrams and asnipe to implement anima
 ### Residents only
 
 ```{r}
+# read in dyad proximity scores
+prox <- read.csv("results/prox_residents.csv") %>%
+  # select id and prox columns
+  select(id1, id2, prox) %>%
+  # format prox numeric to 3 dec places
+  mutate(prox = as.numeric(format(round(prox, 4), nsmall = 4)))
+
 
 ```
+
 
 
 ### Residents and reinforcers
