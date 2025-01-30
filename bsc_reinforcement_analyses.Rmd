@@ -32,17 +32,21 @@ metadata  <- read.csv("data/metadata.csv") %>%
 
 # Introduction
 
-Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed (e.g., increase population size, add diversity) but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
+Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts and therefore have cohorts released into the presence of conspecifics. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
 
-Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (previously released and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? And do social interactions benefit the reinforcing cohort? 
+Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour?
+
+## Translocation
+
+We translocated 35 adult captive-bred bush stone-curlews from Mt Rothwell captive colony to Mt Rothwell Zone 1 (fenced sanctuary) in two stages. The first (pilot) cohort of 16 birds was released between October 2022 and June 2023. The second (reinforcing) cohort of 20 birds was released in June 2023. One bird in the first cohort was taken back into captivity after a single day and re-released in the second cohort; hence total 35 individuals.
+
+## Telemetry
+
+All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaining birds except one, ahead of the 3G shutdown).
+
+The study period for this analysis ends 5th August 2023, when half of the reinforcing cohort were translocated to a secondary site (Orana).
 
 # Data cleaning
-
-We translocated 36 adult captive-bred bush stone-curlews from Mt Rothwell captive colony to Mt Rothwell Zone 1 (fenced sanctuary) in two stages. The first (pilot) cohort of 16 birds was released between October 2022 and June 2023. The second (reinforcing) cohort of 20 birds was released in June 2023. 
-
-All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaning birds except one, ahead of the 3G shutdown).
-
-The study period for this study ends 5th August 2023, when half of the reinforcing cohort were translocated to a secondary site (Orana).
 
 High throughput animal tracking data require filtering to remove erroneous points, while maintaining real movement data. We follow the workflow by [Gupte et al. (2021)](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.13610), that is:
 
@@ -83,7 +87,13 @@ ggmap(map_z13)+
 
 ### 2) Filtering by quality covariates
 
-In the past I've found filtering by satellite count and hdop has a high rate of false positives (removing real movement) and low rate of true positives (removing unrealistic movement) so we don't want to be overly aggressive with the application of these filters.
+We filter using the following covariates: 
+
+* satellite count
+* horizontal dilution of precision (HDOP)
+* altitude
+
+In the past I've found filtering by satellite count and hdop can remove errors, but when applied with the wrong parameters they can have a high rate of false positives (removing real movement) and low rate of true positives (removing unrealistic movement) so we don't want to be overly aggressive with the application of these filters.
 
 ```{r}
 # Histogram of satellite vales
@@ -125,7 +135,7 @@ First we need to find flight height altitude by correcting for ground elevation.
 
 ```{r}
 # read in FABDEM
-fabdem <- rast("S38E144_FABDEM_V1-0.tif") 
+fabdem <- rast("data/S38E144_FABDEM_V1-0.tif") 
 
 # convert data to spatial points
 coords <- data_raw %>%
@@ -268,7 +278,7 @@ ggmap(map_z14)+
 
 ### 4) Median smoothing
 
-Even after speed/angle filtering, we retain some smaller-scale 'jitter'- these are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We want to apply it sparingly to not reduce track verismilitude.
+Even after speed/angle filtering, we retain some smaller-scale jitter. These are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We apply it sparingly, because an overly aggressive approach will cut down on real track tortuousity. 
 
 ```{r}
 # Apply median smooth by bird
@@ -368,7 +378,9 @@ ggmap(map_z15)+
   theme_void()
 ```
 
-There are only 65 points outside the fence (given a 30m buffer) which is within tolerance. Interestingly they are all clustered on the southern and eastern fenceline. 
+There are only 65 points outside the fence (given a 30m buffer) which is within tolerance. Interestingly they are all clustered on the southern and eastern fenceline, perhaps there was something about the topography or vegetation in that area that pronounced the errors.
+
+Based on this test subset, I am happy with the filtering parameters for this location.
 
 ## Apply filtering 
 
@@ -376,7 +388,7 @@ We apply all of the above steps to the full dataset.
 
 ### 1) Temporal filtering
 
-We removed points after the end of the study period (4/8/23 at the start of next experiment - translocation to Orana).
+We removed points after the end of the study period (5/8/23 at the start of next experiment - translocation to Orana).
 
 ```{r}
 # Import data from movebank
@@ -400,7 +412,7 @@ We used the following quality covariates:
 
 ```{r}
 # read in FABDEM
-fabdem <- rast("S38E144_FABDEM_V1-0.tif") 
+fabdem <- rast("data/S38E144_FABDEM_V1-0.tif") 
 
 # convert data to spatial points
 coords <- data_raw %>%
@@ -488,7 +500,7 @@ ggmap(map_z14)+
   theme_void()
 ```
 
-Save data - dropping unneeded columns to save space. Originally I kept the utm easting and northing columns but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data when required instead. 
+Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data when required instead. 
 
 ```{r}
 # Convert data to spatial and reproject in utm
@@ -522,7 +534,11 @@ write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 
 # Movement analysis
 
-Here we are only interested in the reinforcement period. The reinforcers were released 7th June to 11th June 2023.
+Here we calculate PRBM metrics from tracking data to assess the establishment of reinforcers. The reinforcement period spans the 55 days between 11 June 2023 (last reinforcer released) and the 5th August 2023 (end of study period when reinforcers are translocated to Orana).
+
+We also compare the response of the residents pre- and post-reinforcement to see if the reinforcement changes the behaviour of the residents. The pre-reinforcement period spans the 142 days between 16th January 2023 (last resident released) to 7th June 2023 (first reinforcer released).
+
+I run these for all the dates to make it simpler (one dataframe instead of multiple per metric for each time period) and then filter to dates as required.
 
 ```{r}
 # Read in cleaned data 
@@ -1605,11 +1621,16 @@ We use the packages tidygraph for network diagrams and asnipe to implement anima
 
 ### Residents only
 
+```{r}
+
+```
+
+
 ### Residents and reinforcers
 
 # Statistical analysis
 
-We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. I also want to compare both reinforcer groups to the residents to see if one is more simialar than the other (noting this is now for the reinforcement time period, rather than the establishment periods as done in models1-5; i.e. now comparing at the same dates, rather than different dates but same elapsed time post-release).
+We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. I also want to compare both reinforcer groups to the residents to see if one is more similar than the other.
 
 ```{r}
 # social group membership
@@ -1947,17 +1968,15 @@ km <- with(surv_data, Surv(time, status))
 kmfit <- survfit(Surv(time, status) ~ 1, data = surv_data)
 
 # Estimated survival probabilities
-summary(kmfit, times = c(1, 10, 30, 54, 100, 365))
+summary(kmfit, times = c(1, 10, 30, 55, 100, 365))
 
 # plot
 autoplot(kmfit)
 ```
 
-The probability of survival to 1 year is 53% (upper CI = 79%, lower CI = 36%). 
+The probability of survival to 1 year is 50% (CI: 34-75%). The probability of survival to 55 days (the study period) is 91% (CI: 83-100%).
 
-The probability of survival to 54 days (the study period) is 91% (upper CI = 100%, lower CI = 83%).
-
-Now compare cohorts
+Next we compare survial by cohorts.
 
 ```{r}
 # Fit a survival model by cohort
@@ -1973,11 +1992,7 @@ cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
 summary(cox)
 ```
 
-The probability of survival to 54 days for residents is 88% (upper CI = 100%, lower CI = 71%). 
-
-The probability of survival to 54 days for reinforcers is 95% (upper CI = 100%, lower CI = 86%). 
-
-So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
+The probability of survival to 55 days for residents is 87% (CI: 71-100%) and for reinforcers is 95% (CI: 86-100%). So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
 
 ## Reinforcers by social group
 
