@@ -1535,7 +1535,7 @@ data_resident <- move %>%
 dyad <- filter(data_resident, id %in% c("Aurora", "Briar"))
 
 checkTO(dyad)
-
+Sys.time()
 test <- Ca(dyad, tc=4*60, dc=30);Sys.time()
 ```
 
@@ -1582,7 +1582,7 @@ hist(interact2$prox)
 summary(interact2$prox)
 ```
 
-Mean proximity score is 13.9%, min is no interaction and max is 72.4%. 
+Mean proximity score is 13.1%, min is no interaction and max is 43.8%. 
 
 ### Residents and reinforcers
 
@@ -1647,12 +1647,9 @@ We use the packages tidygraph for network diagrams and asnipe to implement anima
 ### Residents only
 
 ```{r}
-# read in dyad proximity scores
-prox <- read.csv("results/prox_residents.csv") %>%
-  # select id and prox columns
-  select(id1, id2, prox) %>%
-  # format prox numeric to 3 dec places
-  mutate(prox = as.numeric(format(round(prox, 4), nsmall = 4)))
+# read in dyad proximity scores and convert to association matrix
+prox <- read.csv("results/proximity_residents.csv") %>%
+  pivot_wider(names_from = id2, values_from = prox)
 
 
 ```
