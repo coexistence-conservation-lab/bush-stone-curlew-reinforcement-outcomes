@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggraph, ggpubr, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, asnipe, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scales, scattermore, sf, sp, STRAND, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1649,16 +1649,200 @@ We use the packages tidygraph for network diagrams and asnipe to implement anima
 ```{r}
 # read in dyad proximity scores and convert to association matrix
 prox <- read.csv("results/proximity_residents.csv") %>%
-  pivot_wider(names_from = id2, values_from = prox)
+  # add rows for last and first bird self comparison
+  rbind(data.frame(id1 = c("Valentine", "Aurora"),
+                   id2 = c("Valentine", "Aurora"),
+                   prox = c(NA, NA))) %>%
+  # long to wide format
+  pivot_wider(names_from = id2, values_from = prox) %>%
+  # first column to rownames
+  column_to_rownames("id1") %>%
+  # relocate first bird to first column
+  relocate(Aurora) %>%
+  # format as matrix
+  as.matrix()
 
+# make symmetrical
+prox[lower.tri(prox)] <- t(prox)[lower.tri(prox)]
 
+# convert to graph object
+network <- graph_from_adjacency_matrix(prox, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+# network density - real edges divided by possible edges
+edge_density(network)
+
+# network components - are all nodes connected?
+components(network)
+
+# distance between nodes
+distances(network, algorithm="unweighted")
+
+# proportion of node's neighbors that are connected to each other
+summary(transitivity(network, "local"))
 ```
 
+We have a network of 13 individuals (nodes) and 68 edges with an edge density of 87.1%. The network is continuous (i.e. all nodes in network are connected) and the maximum degree of separation is two. 
 
+First plot with weighted edges and nodes sized by degree centrality (number of edges - how many "friends" they have).
+
+```{r}
+# set seed to keep layout static
+set.seed(4739)
+networkfr <- create_layout(network, layout = "fr") 
+
+# plot with tidygraph (wrapper for igraph in tidy API)
+ggraph(networkfr)+
+  # format edge colour, alpha and width by the weight (proximity)
+  geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2))+
+  scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
+  # node basic
+  geom_node_point(size = 7, shape = 20)+
+  # add labels
+  geom_node_text(aes(label = name), nudge_y = 0.15)+
+  # theme
+  theme_void()+
+  theme(legend.position="none")
+```
+
+Next calculate community - first deciding on clustering algorithm.
+
+Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750) I will try edge betweenness, walktrap, spinglass and infomap, because I have a small dense network and these perform well in that use case. 
+
+```{r}
+# community with edge betweenness
+eb <- cluster_edge_betweenness(network)
+length(eb)
+modularity(eb)
+membership(eb)
+
+# community with walktrap
+w <- cluster_walktrap(network)
+length(w)
+modularity(w)
+membership(w)
+
+# community with spinglass
+sg <- cluster_spinglass(network)
+length(sg)
+modularity(sg)
+membership(sg)
+
+# community with infomap
+im <- cluster_infomap(network)
+length(im)
+modularity(im)
+membership(im)
+```
+
+They all turned out the same, I'll use walktrap. Plot with community.
+
+```{r}
+# add community to network layout
+comm <- networkfr %>%
+  mutate(community = as.factor(membership(w)))
+
+# plot ggraph
+ggraph(comm)+
+  # format edge colour, alpha and width by the weight (proximity)
+  geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2))+
+  scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
+  # node basic
+  geom_node_point(size = 7, shape = 20)+
+  # add communites
+  geom_mark_hull(aes(x = x, y = y, fill = community), 
+                 colour = "white", alpha = 0.2, expand = unit(1.1, "cm"))+
+  scale_fill_manual(values = c("skyblue", "thistle2"))+
+  # add labels
+  geom_node_text(aes(label = name), nudge_y = 0.17)+
+  # theme
+  theme_void()+
+  theme(legend.position="none")
+```
 
 ### Residents and reinforcers
 
-# Statistical analysis
+```{r}
+# read in dyad proximity scores and convert to association matrix
+prox <- read.csv("results/proximity_reinforcers.csv") %>%
+  # add rows for last and first bird self comparison
+  rbind(data.frame(id1 = c("Zeus", "Athena"),
+                   id2 = c("Zeus", "Athena"),
+                   prox = c(NA, NA))) %>%
+  # long to wide format
+  pivot_wider(names_from = id2, values_from = prox) %>%
+  # first column to rownames
+  column_to_rownames("id1") %>%
+  # relocate first bird to first column
+  relocate(Athena) %>%
+  # format as matrix
+  as.matrix()
+
+# make symmetrical
+prox[lower.tri(prox)] <- t(prox)[lower.tri(prox)]
+
+# convert to graph object
+network <- graph_from_adjacency_matrix(prox, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+# network density - real edges divided by possible edges
+edge_density(network)
+
+# network components - are all nodes connected?
+components(network)
+
+# distance between nodes
+distances(network, algorithm="unweighted")
+
+# proportion of node's neighbors that are connected to each other
+summary(transitivity(network, "local"))
+```
+
+We have a network of 28 individuals (nodes) and 377 edges with an edge density of 99.7% (only one dyad doesn't have an edge, Sofi & Daisy). The network is continuous (i.e. all nodes in network are connected) and the maximum degree of separation is two. 
+
+Calculate community with walktrap method and plot the network.
+
+```{r}
+# community with walktrap
+w <- cluster_walktrap(network)
+length(w)
+modularity(w)
+membership(w)
+
+# set seed to keep layout static
+set.seed(7777)
+networkfr <- create_layout(network, layout = "fr") 
+
+# add community and cohort to network layout
+comm <- networkfr %>%
+  rename(id = name) %>%
+  mutate(community = as.factor(membership(w))) %>%
+  left_join(select(metadata, c(id, cohort)))
+
+# plot ggraph
+ggraph(comm)+
+  # format edge colour, alpha and width by the weight (proximity)
+  geom_edge_fan(aes(colour = weight, alpha = weight, 
+                    # rescale width because massive range in values
+                    width = rescale(weight)))+
+  scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
+  # node shape by cohort
+  geom_node_point(aes(shape = cohort), size = 5)+
+  scale_shape_manual(values=c(15, 16))+
+  # add communites
+  geom_mark_hull(aes(x = x, y = y, fill = community), 
+                 colour = "white", alpha = 0.2, expand = unit(1.1, "cm"))+
+  scale_fill_manual(values = c("plum", "skyblue2"))+
+  # add labels
+  geom_node_text(aes(label = id), nudge_y = 0.17)+
+  # theme
+  theme_void()+
+  theme(legend.position="none")
+```
+
+Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was off to the side but ended up in the mixed group. 
+
+# Statistical analysis: reinforcers
+
+Instead of using dyad connections, we can use the social groups (which are fortunately nearly evenly split among the reinforcers) to ask questions about conspecific interactions. Social groups can tell you more about the overal social environment than dyads alone (Farine and Whitehal 2015).
 
 We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. I also want to compare both reinforcer groups to the residents to see if one is more similar than the other.
 
@@ -1674,100 +1858,99 @@ rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"),
 
 ```{r}
 # read in data and filter to reinforcement period
-datam6 <- read.csv("results/daily_distance_moved.csv") %>%
+datam1 <- read.csv("results/daily_distance_moved.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # format dates as dates
   mutate(date = as_date(date_bird)) %>%
   # add column for membership to social group
-  mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) %>%
+  mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
   filter(date %in% rein_dates)
 
 # create social group means
-sum6 <- datam6 %>%
+sum1 <- datam1 %>%
   group_by(date, social) %>%
   summarise(daily_dist = mean(daily_dist)) %>%
   arrange(date)
 
 # plot daily distance by social group
-ggplot(datam6)+
+ggplot(datam1)+
   geom_boxplot(aes(social,daily_dist))+
   theme_minimal()+
   xlab("Social group") + 
   ylab("Daily distance moved (m)")
 
 # plot daily distance over time as social group means
-ggplot(sum6)+
+ggplot(sum1)+
   geom_path(aes(date, daily_dist, color = social))+
   theme_minimal() +
   xlab("Days post-release") + 
   ylab("Daily distance moved (m)")
 
 # plot daily distance over time as linear model
-ggplot(datam6)+
+ggplot(datam1)+
   geom_smooth(aes(date, daily_dist, color = social), method = "lm")+
   theme_minimal() +
   xlab("Days post-release") + 
   ylab("Daily distance moved (m)")
 ```
 
+The mean distance moved (and distance moved over time) for the mixed-reinforcers was more similar to the residents than the exclusive-reinforcer group, but not a pronounced difference.
 
 ```{r}
 # distribution of movement data
-hist(datam6$daily_dist)
-ggqqplot(datam6$daily_dist)
-
-# correct left skew
-hist(sqrt(datam6$daily_dist))
-ggqqplot(sqrt(datam6$daily_dist))
+hist(datam1$daily_dist)
+ggqqplot(datam1$daily_dist)
 
 # test whether establishment differs between the groups
-m6 <- lmer(sqrt(daily_dist) ~ social * scale(date) + (1|id), data = datam6)
-summary(m6)
-emmeans(m6, pairwise ~ social, adjust = "tukey", type = "response")
+m1 <- lmer(daily_dist ~ social + (1|id), data = datam1)
+summary(m1)
+emmeans(m1, pairwise ~ social, adjust = "tukey", type = "response")
 
 # check residuals
-hist(residuals(m6))
-ggqqplot(residuals(m6))
+hist(residuals(m1))
+ggqqplot(residuals(m1))
 ```
 
-### m7: Roost establishment
+No significant difference between groups.
+
+### m2: Roost establishment
 
 ```{r}
 # read in data and filter to reinforcement period
-datam7 <- read.csv("results/daily_distance_between_roosts.csv") %>%
+datam2 <- read.csv("results/daily_distance_between_roosts.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add column for membership to social group
-  mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) %>%
+  mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
   filter(date %in% rein_dates)
 
 # create cohort means
-sum7 <- datam7 %>%
+sum2 <- datam2 %>%
   group_by(date, social) %>%
   summarise(distance_previous = mean(distance_previous)) %>%
   arrange(date)
 
 # plot daily roost distance by social group
-ggplot(datam7)+
+ggplot(datam2)+
   geom_boxplot(aes(social,distance_previous))+
   theme_minimal()+
   xlab("Social group") + 
   ylab("Daily distance between roosts (m)")
 
 # plot daily roost distance over time as social group means
-ggplot(sum7)+
+ggplot(sum2)+
   geom_path(aes(date, distance_previous, color = social))+
   theme_minimal() +
   xlab("Date") + 
   ylab("Daily distance between roosts (m)")
 
 # plot daily roost distance over time as linear model
-ggplot(datam7)+
+ggplot(datam2)+
   geom_smooth(aes(date, distance_previous, color = social), method = "lm")+
   theme_minimal() +
   xlab("Date") + 
@@ -1778,99 +1961,101 @@ The mixed group converges with the residents, whereas the exclusive group contin
 
 ```{r}
 # distribution of movement data
-hist(datam7$distance_previous)
-ggqqplot(datam7$distance_previous)
+hist(datam2$distance_previous)
+ggqqplot(datam2$distance_previous)
 
 # correct left skew
-hist(log(datam7$distance_previous))
-ggqqplot(log(datam7$distance_previous))
+hist(log(datam2$distance_previous))
+ggqqplot(log(datam2$distance_previous))
 
 # test whether establishment differs between the groups
-m7 <- lmer(log(distance_previous) ~ social * scale(date) + (1|id), data = datam7)
-summary(m7)
-emmeans(m7, pairwise ~ social, adjust = "tukey", type = "response")
+m2 <- lmer(log(distance_previous) ~ social + (1|id), data = datam2)
+summary(m2)
+emmeans(m2, pairwise ~ social, adjust = "tukey", type = "response")
 
 # check residuals
 hist(residuals(m7))
 ggqqplot(residuals(m7))
 ```
 
-Both mixed-reinforcer and mixed-resident groups exhibit lower roost displacements compared to the exclusive group. The magnitude of the effect is more pronounced in the mixed-resident group, but both comparisons are statistically significant.
+The exclusive group is significantly different to both the mixed and resident groups (which were not different from one another).
 
-### m8: Release site fidelity
+The larger distances between roosts indicates the exclusive group were less settled and kept moving, while the the mixed group moved less (and the reinforcers decreased over time).
+
+### m3: Release site fidelity
 
 Does release site fidelity differ between the social groups?
 
 ```{r}
 # read in data and filter to reinforcement period
-datam8 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
+datam3 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add column for membership to social group
-  mutate(social = ifelse(id %in% club, "exclusive", ifelse(cohort == "Resident", "mixed-resident", "mixed-reinforcer"))) %>%
+  mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
   filter(date %in% rein_dates)
 
 # create cohort means
-sum8 <- datam8 %>%
+sum3 <- datam3 %>%
   group_by(date, social) %>%
   summarise(dist_release = mean(dist_release)) %>%
   arrange(date)
 
 # plot release site distance by social group
-ggplot(datam8)+
+ggplot(datam3)+
   geom_boxplot(aes(social, dist_release))+
   theme_minimal()+
   xlab("Social group") + 
   ylab("Distance from release site (m)")
 
 # plot release site distance over time as social group means
-ggplot(sum8)+
+ggplot(sum3)+
   geom_path(aes(date, dist_release, color = social))+
   theme_minimal() +
   xlab("Date") + 
   ylab("Distance from release site (m)")
 
 # plot release site distance over time as linear model
-ggplot(datam8)+
+ggplot(datam3)+
   geom_smooth(aes(date, dist_release, color = social), method = "lm")+
   theme_minimal() +
   xlab("Date") + 
   ylab("Distance from release site (m)")
 ```
 
-The reinforcers in the mixed group stayed similarly close to the release site as the residents (who were occupying an area of the woodland near the release site when the reinforcement translocation occurred), whereas the exclusive group left the area.
+The reinforcers in the mixed group stayed similarly close to the release site as the residents (who were occupying an area of the woodland near the release site when the reinforcement translocation occurred), whereas the exclusive group left the area and went increasingly far from the release location.
 
 ```{r}
 # distribution of movement data
-hist(datam8$dist_release)
-ggqqplot(datam8$dist_release)
+hist(datam3$dist_release)
+ggqqplot(datam3$dist_release)
 
 # correct left skew - still not great but a bit better
-hist(sqrt(datam8$dist_release))
-ggqqplot(sqrt(datam8$dist_release))
+hist(sqrt(datam3$dist_release))
+ggqqplot(sqrt(datam3$dist_release))
 
 # test whether establishment differs between the social groups
-m8 <- lmer(sqrt(dist_release) ~ social * scale(date) + (1|id), data = datam8)
-summary(m8)
-emmeans(m8, pairwise ~ social, adjust = "tukey", type = "response")
+m3 <- lmer(sqrt(dist_release) ~ social + (1|id), data = datam3)
+summary(m3)
+emmeans(m3, pairwise ~ social, adjust = "tukey", type = "response")
 
 # check residuals
-hist(residuals(m8))
-ggqqplot(residuals(m8))
+hist(residuals(m3))
+ggqqplot(residuals(m3))
 ```
 
-Both mixed-reinforcer and mixed-resident groups have significantly lower dist_release compared to the exclusive group.
+The exclusive group moved significantly further from the release site than the mixed and resident groups (which were not different from one another).
 
 Significant negative interactions between social group and date for both mixed-reinforcer (-3.0415, p < 0.00001) and mixed-resident (-2.6524, p < 0.00001) groups, indicating that the increase in dist_release over time is less pronounced for these groups compared to the exclusive group.
 
-### m9: Home range establishment
+### m4: Home range establishment
 
-### m10: Time budget
+### m5: Time budget
 
-### m11: Weight change
+### m6: Weight change
 
 In addition to the movement-based metrics of performance I wanted to look at health check data. Weight change post-release is a good indicator of performance, where some loss is expected but less steep decline (trending towards stability) indicates better performance.
 
@@ -1880,7 +2065,7 @@ Unlike the movement data, the study period is for 70 days because weights were t
 
 ```{r}
 # read in data and clean up
-datam11 <- read_xlsx("data/healthchecks.xlsx") %>%
+datam6 <- read_xlsx("data/healthchecks.xlsx") %>%
   clean_names() %>%
   rename(id = identity) %>%
   select(id, date, weight) %>%
@@ -1904,19 +2089,19 @@ datam11 <- read_xlsx("data/healthchecks.xlsx") %>%
   filter(elapsed <70)
 
 # plot weight pre and post-release
-ggplot(datam11)+
+ggplot(datam6)+
   geom_boxplot(aes(status, weight))+
   theme_minimal()
 
 # plot weight pre and post release by individual, facet wrap social
-ggplot(datam11)+
+ggplot(datam6)+
   geom_path(aes(status, weight, colour = id, group = id))+
   theme_minimal()+
   scale_colour_viridis_d()+
   facet_wrap(~social)
 
 # plot weight pre and post release by social group as a linear model
-ggplot(datam11)+
+ggplot(datam6)+
   geom_smooth(aes(status, weight, colour = social, group = social), method = "lm")+
   theme_minimal()
 ```
@@ -1927,7 +2112,7 @@ Next I calculated the change in weight both in grams and as a proportion of star
 
 ```{r}
 # calculate weight change in grams and as a proportion of starting weight
-sum11 <- datam11 %>%
+sum6 <- datam6 %>%
   select(c(id, social, weight, status)) %>%
   pivot_wider(names_from = status, values_from = weight) %>%
   clean_names() %>%
@@ -1937,12 +2122,12 @@ sum11 <- datam11 %>%
          proportion = diff/pre_release)
 
 # plot total weight differences by social group
-ggplot(sum11)+
+ggplot(sum6)+
   geom_boxplot(aes(social, diff))+
   theme_minimal()
 
 # plot proportional weight differences by social group
-ggplot(sum11)+
+ggplot(sum6)+
   geom_boxplot(aes(social, proportion))+
   theme_minimal()
 ```
@@ -1951,11 +2136,11 @@ Although total weight change seems on average lower in the mixed group, proporti
 
 ```{r}
 # check distribution of the difference
-hist(sum11$diff)
-ggqqplot(sum11$diff)
+hist(sum6$diff)
+ggqqplot(sum6$diff)
 
 # summary stats
-sums <- sum11 %>%
+sums <- sum6 %>%
   group_by(social) %>%
   summarise(mean_diff = mean(diff),
             se_diff = sd(diff, na.rm = TRUE) / sqrt(n()),
@@ -1963,14 +2148,13 @@ sums <- sum11 %>%
             se_prop = sd(proportion, na.rm = TRUE) / sqrt(n()))
 
 # test whether weight change differs between the social groups
-m11 <- lm(diff ~ social, data = sum11)
-summary(m11)
-emmeans(m8, pairwise ~ social, adjust = "tukey", type = "response")
+m6 <- lm(diff ~ social, data = sum6)
+summary(m6)
 ```
 
 There is no significant differences between groups for weight loss.
 
-## Effect on residents pre- and post-reinforcement
+# Statistical analysis: residents
 
 # Survival analysis
 
