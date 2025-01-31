@@ -1640,9 +1640,9 @@ Summary stats here
 
 ## Social network
 
-For social network analysis we follow [Farine & Whitehead 2015](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2656.12418) where the edges are the proximity metrics calculated above. Proximity networks are inferred interactions but with a highly complete data set - so trade-off temporal resolution with little information on any one interaction. 
+For social network analysis we use the proximity analysis of dyads completed above. Proximity networks are inferred interactions but with a highly complete data set - so we are trading off good temporal resolution and complete coverage of the population against little information on any one interaction. 
 
-We use the packages tidygraph for network diagrams and asnipe to implement animal social network analysis.
+We use the package tidygraph as a wrapper for implement igraph graphics in the tidyverse API.
 
 ### Residents only
 
@@ -1696,9 +1696,9 @@ ggraph(networkfr)+
   geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2))+
   scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
   # node basic
-  geom_node_point(size = 7, shape = 20)+
+  geom_node_point(size = 7, shape = 16)+
   # add labels
-  geom_node_text(aes(label = name), nudge_y = 0.15)+
+  #geom_node_text(aes(label = name), nudge_y = 0.15)+
   # theme
   theme_void()+
   theme(legend.position="none")
@@ -1747,16 +1747,17 @@ ggraph(comm)+
   geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2))+
   scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
   # node basic
-  geom_node_point(size = 7, shape = 20)+
+  geom_node_point(size = 7, shape = 16)+
   # add communites
   geom_mark_hull(aes(x = x, y = y, fill = community), 
                  colour = "white", alpha = 0.2, expand = unit(1.1, "cm"))+
   scale_fill_manual(values = c("skyblue", "thistle2"))+
   # add labels
-  geom_node_text(aes(label = name), nudge_y = 0.17)+
+  #geom_node_text(aes(label = name), nudge_y = 0.17)+
   # theme
   theme_void()+
-  theme(legend.position="none")
+  theme(legend.position="none")+
+  expand_limits(x = c(-6, 3), y = c(-4.5, 0.4))
 ```
 
 ### Residents and reinforcers
@@ -1802,13 +1803,13 @@ Calculate community with walktrap method and plot the network.
 
 ```{r}
 # community with walktrap
-w <- cluster_walktrap(network)
+w <- cluster_walktrap(network, steps = 10)
 length(w)
 modularity(w)
 membership(w)
 
 # set seed to keep layout static
-set.seed(7777)
+set.seed(0000)
 networkfr <- create_layout(network, layout = "fr") 
 
 # add community and cohort to network layout
@@ -1820,22 +1821,21 @@ comm <- networkfr %>%
 # plot ggraph
 ggraph(comm)+
   # format edge colour, alpha and width by the weight (proximity)
-  geom_edge_fan(aes(colour = weight, alpha = weight, 
-                    # rescale width because massive range in values
-                    width = rescale(weight)))+
-  scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
+  geom_edge_fan(aes(colour = weight, alpha = weight))+
+  scale_edge_color_continuous(low = "grey", high = "slateblue4")+ 
   # node shape by cohort
   geom_node_point(aes(shape = cohort), size = 5)+
   scale_shape_manual(values=c(15, 16))+
   # add communites
   geom_mark_hull(aes(x = x, y = y, fill = community), 
-                 colour = "white", alpha = 0.2, expand = unit(1.1, "cm"))+
+                 colour = "white", alpha = 0.2, expand = unit(1, "cm"))+
   scale_fill_manual(values = c("plum", "skyblue2"))+
   # add labels
-  geom_node_text(aes(label = id), nudge_y = 0.17)+
+  #geom_node_text(aes(label = id), nudge_y = 0.17)+
   # theme
   theme_void()+
-  theme(legend.position="none")
+  theme(legend.position="none")+
+  expand_limits(x = c(2, 7), y = c(-3.8, 2.6))
 ```
 
 Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was off to the side but ended up in the mixed group. 
@@ -1906,7 +1906,9 @@ ggqqplot(datam1$daily_dist)
 # test whether establishment differs between the groups
 m1 <- lmer(daily_dist ~ social + (1|id), data = datam1)
 summary(m1)
-emmeans(m1, pairwise ~ social, adjust = "tukey", type = "response")
+
+# post-hoc Tukey
+emmeans(m1, pairwise ~ social, adjust = "tukey")
 
 # check residuals
 hist(residuals(m1))
@@ -1954,7 +1956,8 @@ ggplot(datam2)+
   geom_smooth(aes(date, distance_previous, color = social), method = "lm")+
   theme_minimal() +
   xlab("Date") + 
-  ylab("Daily distance between roosts (m)")
+  ylab("Daily distance between roosts (m)")+
+  scale_colour_viridis_d()
 ```
 
 The mixed group converges with the residents, whereas the exclusive group continues to increase.
@@ -2023,7 +2026,8 @@ ggplot(datam3)+
   geom_smooth(aes(date, dist_release, color = social), method = "lm")+
   theme_minimal() +
   xlab("Date") + 
-  ylab("Distance from release site (m)")
+  ylab("Distance from release site (m)")+
+  scale_colour_viridis_d()
 ```
 
 The reinforcers in the mixed group stayed similarly close to the release site as the residents (who were occupying an area of the woodland near the release site when the reinforcement translocation occurred), whereas the exclusive group left the area and went increasingly far from the release location.
@@ -2155,6 +2159,8 @@ summary(m6)
 There is no significant differences between groups for weight loss.
 
 # Statistical analysis: residents
+
+Do they remain more attached to residents?
 
 # Survival analysis
 
