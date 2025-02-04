@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scales, scattermore, sf, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scales, scattermore, sf, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -28,6 +28,43 @@ metadata  <- read.csv("data/metadata.csv") %>%
   mutate(start_date = as_date(dmy(start_date)),
          end_date = as_date(dmy(end_date)),
          mortality = as_date(dmy(mortality)))
+
+# Define fence polygons (zones 1 and 2)
+mtr <- rbind(
+  ## zone 1
+  c(-37.897319, 144.429048), # S end of NW diagonal
+  c(-37.894066, 144.432334), # N end of NW diagonal, i.e. NW corner
+  c(-37.894749, 144.438305), # bend at main gate 
+  c(-37.894693, 144.438324), # main gate
+  c(-37.894803, 144.439214), # bend before N Z1/2 gate
+  c(-37.894718, 144.439337), # N Z1/2 gate, i.e. NE corner 
+  ## zone 2
+  c(-37.892433, 144.440236), # N boundary internal aviary/Z2 i.e. NW corner
+  c(-37.892803, 144.443374), # Z2 northern boundary bend 1
+  c(-37.893634, 144.444076), # Z2 northern boundary bend 2
+  c(-37.894585, 144.447739), # N end of Z2/Z3 boundary, i.e. NE corner
+  c(-37.896515, 144.446789), # Z2/Z3 boundary bend 1
+  c(-37.896726, 144.446099), # Z2/Z3 boundary bend 2
+  c(-37.897964, 144.445706), # Z2/Z3 boundary bend 3
+  c(-37.899960, 144.444517), # S end of Z2/Z3 boundary, i.e. SE corner
+  c(-37.899908, 144.444288), # Z2/btrw NE corner
+  c(-37.898280, 144.440662), # Z1/btrw pen NW corner
+  ## zone 1
+  c(-37.900692, 144.440368), # Z1/btrw SW corner
+  c(-37.902610, 144.443002), # Z1/btrw SE corner
+  c(-37.909538, 144.439648), # Z1 SE corner
+  c(-37.908999, 144.434965), # Z1 southern boundary bend 1
+  c(-37.907537, 144.433359), # Z1 southern boundary bend 2
+  c(-37.905958, 144.430140), # Z1 southern boundary bend 3
+  c(-37.905486, 144.429479), # Z1 southern boundary bend 4
+  c(-37.904649, 144.427566), # Z1 SW corner
+  c(-37.897319, 144.429048)  # S end of NW diagonal
+  ) %>%  vect(type = "polygons", crs = "EPSG:4326") %>% 
+  # transpose
+  t() %>%
+  # add a buffer for GPS accuracy of 30m for analysis, and 10m for mapping
+  #buffer(10)
+  buffer(30)
 ```
 
 # Introduction
@@ -318,47 +355,7 @@ ggmap(map_z15)+
 ```
 
 *_Visual check using fence polygon._*
-We know Fauna didn't leave the study site during the tracking period so this is a good way to check if filtering was successful. 
-
-First define the fenced area.
-
-```{r}
-# Define fence polygons (zones 1 and 2)
-mtr <- rbind(
-  ## zone 1
-  c(-37.897319, 144.429048), # S end of NW diagonal
-  c(-37.894066, 144.432334), # N end of NW diagonal, i.e. NW corner
-  c(-37.894749, 144.438305), # bend at main gate 
-  c(-37.894693, 144.438324), # main gate
-  c(-37.894803, 144.439214), # bend before N Z1/2 gate
-  c(-37.894718, 144.439337), # N Z1/2 gate, i.e. NE corner 
-  ## zone 2
-  c(-37.892433, 144.440236), # N boundary internal aviary/Z2 i.e. NW corner
-  c(-37.892803, 144.443374), # Z2 northern boundary bend 1
-  c(-37.893634, 144.444076), # Z2 northern boundary bend 2
-  c(-37.894585, 144.447739), # N end of Z2/Z3 boundary, i.e. NE corner
-  c(-37.896515, 144.446789), # Z2/Z3 boundary bend 1
-  c(-37.896726, 144.446099), # Z2/Z3 boundary bend 2
-  c(-37.897964, 144.445706), # Z2/Z3 boundary bend 3
-  c(-37.899960, 144.444517), # S end of Z2/Z3 boundary, i.e. SE corner
-  c(-37.899908, 144.444288), # Z2/btrw NE corner
-  c(-37.898280, 144.440662), # Z1/btrw pen NW corner
-  ## zone 1
-  c(-37.900692, 144.440368), # Z1/btrw SW corner
-  c(-37.902610, 144.443002), # Z1/btrw SE corner
-  c(-37.909538, 144.439648), # Z1 SE corner
-  c(-37.908999, 144.434965), # Z1 southern boundary bend 1
-  c(-37.907537, 144.433359), # Z1 southern boundary bend 2
-  c(-37.905958, 144.430140), # Z1 southern boundary bend 3
-  c(-37.905486, 144.429479), # Z1 southern boundary bend 4
-  c(-37.904649, 144.427566), # Z1 SW corner
-  c(-37.897319, 144.429048)  # S end of NW diagonal
-  ) %>%  vect(type = "polygons", crs = "EPSG:4326") %>% t() %>%
-  # add a buffer for GPS accuracy of 30m
-  buffer(30)
-```
-
-Then filter for points from "Fauna" outside of the polygon. 
+We know Fauna didn't leave the study site during the tracking period so this is a good way to check if filtering was successful. Filter for points from "Fauna" outside of the polygon. 
 
 ```{r}
 # Convert df to points
@@ -632,7 +629,7 @@ write.csv(data_night, "data/data_clean_night.csv", row.names = FALSE)
 
 ## Distance moved
 
-How long does it take birds to settle? Do acclimation periods differ between cohorts?
+How long does it take birds to settle? 
 
 Distance moved per night over time. Calculation is done per bird per day (bird date).
 
@@ -1710,25 +1707,25 @@ Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles
 
 ```{r}
 # community with edge betweenness
-eb <- cluster_edge_betweenness(network)
+eb <- cluster_edge_betweenness(network1)
 length(eb)
 modularity(eb)
 membership(eb)
 
 # community with walktrap
-w <- cluster_walktrap(network)
+w <- cluster_walktrap(network1)
 length(w)
 modularity(w)
 membership(w)
 
 # community with spinglass
-sg <- cluster_spinglass(network)
+sg <- cluster_spinglass(network1)
 length(sg)
 modularity(sg)
 membership(sg)
 
 # community with infomap
-im <- cluster_infomap(network)
+im <- cluster_infomap(network1)
 length(im)
 modularity(im)
 membership(im)
@@ -1814,6 +1811,8 @@ n1 <- ggraph(comm1)+
   geom_mark_hull(aes(x = x, y = y, fill = community), 
                  colour = "white", alpha = 0.2, expand = unit(0.5, "cm"),
                  show.legend = FALSE)+
+  
+  scale_fill_manual(values = c("grey10", "grey60"))+
   # format edge colour, alpha and width by the weight (proximity)
   geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2),
                 show.legend = FALSE)+
@@ -1831,7 +1830,7 @@ n2 <- ggraph(comm2)+
   geom_mark_hull(aes(x = x, y = y, fill = community), 
                  colour = "white", alpha = 0.2, expand = unit(0.8, "cm"),
                  show.legend = FALSE)+
-  scale_fill_manual(values = c("#2E3EDC", "#07A567"))+
+  scale_fill_manual(values = c("seagreen3", "#2E3FFF"))+
   # format edge colour, alpha and width by the weight (proximity)
   geom_edge_fan(aes(colour = weight, alpha = weight, width = weight),
                 show.legend = FALSE)+
@@ -1856,16 +1855,18 @@ ggarrange(n1, n2,
 
 # Statistical analysis: reinforcers
 
-Instead of using dyad connections, we can use the social groups (which are serendipitously nearly evenly split among the reinforcers) to ask questions about conspecific interactions. Social groups can tell you more about the overal social environment than dyads alone (Farine and Whitehal 2015).
+Instead of using dyad connections, we can use the social groups (which are serendipitously nearly evenly split among the reinforcers) to ask questions about conspecific interactions. Social groups can tell you more about the overall social environment than dyads alone (Farine and Whitehal 2015).
 
 We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. I also want to compare both reinforcer groups to the residents to see if one is more similar than the other.
+
+Dates are from the last reinforcer released to the first reinforcer translocated to the secondary site. 
 
 ```{r}
 # social group membership
 club <- c("Rowan", "Rory", "Fauna", "Zeus", "Rocky", "Sofi", "Loki", "Avery", "Maeve")
 
 # define reinforcer date period
-rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2024-01-10"), by = "day")
+rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2023-08-05"), by = "day")
 ```
 
 ### m1: Distance moved
@@ -2085,6 +2086,41 @@ ggqqplot(residuals(m3))
 Exclusive reinforcers moved significantly further from the release site than both mixed reinforcers (p = 0.025) and residents (p = 0.0011). All founders moved away from the release site over time (estimate = 3.3473, SE = 0.1552, p < 0.0001); however, compared to exclusive reinforcers, the residents and mixed reinforcers had significantly slower increases in distance from the release site over time (p < 0.0001). 
 
 Greater release site fidelity in the mixed group, while the exclusive group continued to move away.
+
+#### Release site fidelity map
+
+How do they move away from the release site over time
+
+```{r}
+ggmap(map_z15)+
+  # plot roosts colour by time
+  geom_point(aes(longitude, latitude, colour = date),
+             size = 2, data = datam2, inherit.aes = FALSE)+
+  # add release location
+  geom_point(aes(144.434323, -37.902374), 
+             colour = "white", size = 5, shape = 13, inherit.aes = FALSE)+
+  # add fence
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash")+
+  # wrap by period
+  facet_wrap(~social)+
+  # theme options
+  scale_colour_viridis_c(trans = "date", name = "2023")+
+  theme_void()+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
+  theme(legend.position="bottom",
+        legend.key.width = unit(3, 'cm'),
+        strip.text = element_text(size = 13))+
+  # add north in just the resident facet panel
+  annotation_north_arrow(data  = subset(datam2, social == "Resident"),
+                         location = "tr", 
+                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(data  = subset(datam2, social == "Resident"),
+                   location = "br", text_col = "black",
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))
+```
 
 ### m4: Home range establishment
 
@@ -2414,10 +2450,389 @@ Multi plot of all effects.
 
 ```
 
+# Statistical analysis residents
 
-# Statistical analysis: residents
+We want to know if the residents change their behaviour in response to the reinforcing release. To test this we compare their movement metrics before and after the reinforcement for the same period i.e. 60 days either side. Unlike the reinforcer dates, we are measuring post-release from the *first* reinforcer released, rather than the last - because these 3 days still have potential to impact the residents. 
 
-Do they remain more attached to residents?
+```{r}
+# define pre-release date period
+pre_dates <- seq.Date(from = as_date("2023-04-08"), to = as_date("2023-06-06"), by = "day")
+
+# define post-release date period
+post_dates <- seq.Date(from = as_date("2023-06-07"), to = as_date("2023-08-05"), by = "day")
+
+# all dates
+dates <- c(pre_dates, post_dates)
+```
+
+## m7: Distance moved
+
+Do residents change their distance moved after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam7 <- read.csv("results/daily_distance_moved.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as dates
+  mutate(date = as_date(date_bird)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# create cohort mean
+sum7 <- datam7 %>%
+  group_by(date) %>%
+  summarise(daily_dist = mean(daily_dist)) %>%
+  arrange(date) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# plot means
+ggplot(datam7)+
+  geom_boxplot(aes(period, daily_dist))+
+  theme_minimal()
+
+# plot residents over time
+ggplot(sum7)+
+  geom_path(aes(date, daily_dist))+
+  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")+
+  theme_minimal()+
+  xlab("Date") + 
+  ylab("Daily distance moved (m)")
+
+# plot as a linear model
+ggplot(datam7)+
+  geom_smooth(aes(date, daily_dist, colour = period), method = "lm")+
+  theme_minimal()+
+  xlab("Date") + 
+  ylab("Daily distance moved (m)")
+```
+
+They reduce their daily distance moved and then slowly increase it back to pre-release levels.
+
+```{r}
+# summarise to period
+per7 <- datam7 %>%
+  group_by(period, id) %>%
+  summarise(daily_dist = mean(daily_dist))
+
+# distribution of movement data
+hist(per7$daily_dist)
+ggqqplot(per7$daily_dist)
+
+# test difference between the groups with interaction of time
+m7 <- lmer(daily_dist ~ period + (1|id), data = per7)
+summary(m7)
+anova(m7)
+
+# check residuals
+hist(residuals(m7))
+ggqqplot(residuals(m7))
+```
+
+They moved significantly less far in the period post-release (p = 0.0291). 
+
+## m8: Roost location
+
+Do residents change their distance between roosts after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam8 <- read.csv("results/daily_distance_between_roosts.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as dates
+  mutate(date = as_date(date)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement"))) %>%
+  # without major outliers from Nutmeg beyond the fence
+  filter(distance_previous < 2000)
+
+# create cohort mean
+sum8 <- datam8 %>%
+  group_by(date) %>%
+  summarise(distance_previous = mean(distance_previous)) %>%
+  arrange(date) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# plot means
+ggplot(datam8)+
+  geom_boxplot(aes(period, distance_previous))+
+  theme_minimal()
+
+# plot residents over time
+ggplot(sum8)+
+  geom_path(aes(date, distance_previous))+
+  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")+
+  theme_minimal() +
+  xlab("Date") + 
+  ylab("Distance between consecutive roosts (m)")
+
+# plot as a linear model
+ggplot(datam8)+
+  geom_smooth(aes(date, distance_previous, colour = period), method = "lm")+
+  theme_minimal()+
+  xlab("Date") + 
+  ylab("Distance between consecutive roosts (m)")
+```
+
+The linear model plot is a bit misleading because it's adding a trendline to what is basically static and then a spike either side of release - also I'm unsure why there is a spike just before release. Maybe because I was in the reserve and bothering them?
+
+```{r}
+# summarise to period
+per8 <- datam8 %>%
+  group_by(period, id) %>%
+  summarise(distance_previous = mean(distance_previous))
+
+# distribution of movement data
+hist(per8$distance_previous)
+ggqqplot(per8$distance_previous)
+
+# test difference between the groups with interaction of time
+m8 <- lmer(distance_previous ~ period + (1|id), data = per8)
+summary(m8)
+
+# check residuals
+hist(residuals(m8))
+ggqqplot(residuals(m8))
+```
+
+No difference in roost site displacement.
+
+## m9: Release-site distance
+
+Do residents change their distance from the release site after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam9 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as dates
+  mutate(date = as_date(date)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# create cohort mean
+sum9 <- datam9 %>%
+  group_by(date) %>%
+  summarise(dist_release = mean(dist_release)) %>%
+  arrange(date) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# plot means
+ggplot(datam9)+
+  geom_boxplot(aes(period, dist_release))+
+  theme_minimal()
+
+# plot residents over time
+ggplot(sum9)+
+  geom_path(aes(date, dist_release))+
+  geom_vline(aes(xintercept = as_date("2023-06-06")), colour = "purple")+
+  theme_minimal() +
+  xlab("Date") + 
+  ylab("Distance from release site (m)")
+
+# plot as a linear model
+ggplot(datam9)+
+  geom_smooth(aes(date, dist_release, colour = period), method = "lm")+
+  theme_minimal() +
+  xlab("Date") + 
+  ylab("Distance from release site (m)")
+```
+
+The residents had already gradually been moving back in from zone 2 to zone 1 but the reinforcement attracted them to the central woodland north of the release site. 
+
+```{r}
+# summarise to period
+per9 <- datam9 %>%
+  group_by(period, id) %>%
+  summarise(dist_release = mean(dist_release))
+
+# distribution of movement data
+hist(per9$dist_release)
+ggqqplot(per9$dist_release)
+
+# test difference between the groups with interaction of time
+m9 <- lmer(dist_release ~ period + (1|id), data = per9)
+summary(m9)
+
+# check residuals
+hist(residuals(m9))
+ggqqplot(residuals(m9))
+```
+
+Not the best model and weird distribution of data. There is a difference in how far they are from the release site post-release (0.000356).
+
+### Resident change map
+
+I think it would be helpful to visualise their roost locations on a map.
+
+```{r}
+ggmap(map_z15)+
+  # plot roosts colour by time
+  geom_point(aes(longitude, latitude, colour = date),
+             size = 2, data = datam8, inherit.aes = FALSE)+
+  # add release location
+  geom_point(aes(144.434323, -37.902374), 
+             colour = "white", size = 5, shape = 13, inherit.aes = FALSE)+
+  # add fence
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash")+
+  # wrap by period
+  facet_wrap(~period)+
+  # theme options
+  scale_colour_viridis_c(trans = "date", name = "2023")+
+  theme_void()+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
+  theme(legend.position="bottom",
+        legend.key.width = unit(4, 'cm'),
+        strip.text = element_text(size = 15))
+```
+
+## m10: Home range size
+
+Do residents change their home range size after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam10 <- read.csv("results/daily_hr_area.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as dates
+  mutate(date = as_date(date)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement"))) %>%
+  # remove crazy outlier from Nutmeg's excursion
+  filter(area < 100)
+
+# create cohort mean
+sum10 <- datam10 %>%
+  group_by(date) %>%
+  summarise(area = mean(area)) %>%
+  arrange(date) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# plot means
+ggplot(datam10)+
+  geom_boxplot(aes(period, area))+
+  theme_minimal()
+
+# plot residents over time
+ggplot(sum10)+
+  geom_path(aes(date, area))+
+  geom_vline(aes(xintercept = as_date("2023-06-06")), colour = "purple")+
+  theme_minimal() +
+  xlab("Date") + 
+  ylab("Home range size (ha)")
+
+# plot as a linear model
+ggplot(datam10)+
+  geom_smooth(aes(date, area, colour = period), method = "lm")+
+  theme_minimal() +
+  xlab("Date") + 
+  ylab("Home range size (ha)")
+```
+
+Doesn't look like much difference.
+
+```{r}
+# summarise to period
+per10 <- datam10 %>%
+  group_by(period, id) %>%
+  summarise(area = mean(area))
+
+# distribution of movement data
+hist(per10$area)
+ggqqplot(per10$area)
+
+# test difference between the groups with interaction of time
+m10 <- lmer(area ~ period + (1|id), data = per10)
+summary(m10)
+
+# check residuals
+hist(residuals(m10))
+ggqqplot(residuals(m10))
+```
+
+No difference. 
+
+## m11: Time over the fence
+
+I suspect the flightless reinforcers acted as an anchor to the residents, most of whom had regained flight. How many days (night technically) over the fence?
+
+```{r}
+# read in night data
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # format time as posixct
+  mutate(time_local = as.POSIXct(time_local),
+         date_bird = as_date(date_bird)) %>%
+  # add cohort info
+  left_join(select(metadata, c(id, cohort))) %>%
+  # keep only residents
+  filter(cohort == "Resident") %>%
+  # pre and post release period dates
+  filter(date_bird %in% dates)
+
+# convert to spatial points
+points <- data_night %>%
+  vect(geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+# Find points outside fence
+outside <- points[!relate(points, mtr, "intersects")] %>%
+  as.data.frame(geom = "XY")
+  
+# Plot points outside fence 
+ggmap(map_z14)+
+  geom_point(data=outside, aes(x, y, colour = id), alpha = 0.7, size = 3)+
+  geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
+  scale_colour_viridis_d()+
+  theme_void()
+
+# Days with points outside
+excursion <- outside %>%
+  group_by(id, date_bird) %>%
+  summarise(count = length(id)) %>%
+  # filter days <10 points unlikely to be an excursion
+  filter(count >= 10)
+```
+
+It's really only Nutmeg and Marmalade with flight at this stage, so insufficient replication to answer this question.
 
 # Survival analysis
 
