@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, emmeans, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, readxl, scales, scattermore, sf, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, effects, emmeans, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, readxl, scales, scattermore, sf, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
 
 # Google API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -1880,12 +1880,14 @@ datam1 <- read.csv("results/daily_distance_moved.csv") %>%
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # format dates as dates
   mutate(date = as_date(date_bird)) %>%
+  # limit to reinforcement period
+  filter(date %in% rein_dates) %>%
   # add a time elapsed post-release variable
-  mutate(elapsed = date - as_date("2023-06-11")) %>%
+  mutate(elapsed = as.numeric(date - as_date("2023-06-11"))) %>%
   # add column for membership to social group
   mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
-  # limit to reinforcement period
-  filter(date %in% rein_dates)
+  # convert group to factor and set resident as the intercept
+  mutate(social = factor(social, levels = c("Resident", "Reinforcer - mixed", "Reinforcer - exclusive")))
 
 # create social group means
 sum1 <- datam1 %>%
@@ -1896,27 +1898,23 @@ sum1 <- datam1 %>%
 # plot daily distance by social group
 ggplot(datam1)+
   geom_boxplot(aes(social,daily_dist))+
-  theme_minimal()+
-  xlab("Social group") + 
+  xlab("Social group")+ 
   ylab("Daily distance moved (m)")+
   theme_minimal()
 
 # plot daily distance over time as social group means
 ggplot(sum1)+
   geom_path(aes(date, daily_dist, color = social), linewidth = 1)+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  xlab("Days post-release")+ 
   ylab("Daily distance moved (m)")+
-  theme_minimal()+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 
 # plot daily distance over time as linear model
 ggplot(datam1)+
   geom_smooth(aes(elapsed, daily_dist, color = social), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  xlab("Days post-release")+ 
   ylab("Daily distance moved (m)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 ```
 
 The mean distance moved (and distance moved over time) for the mixed-reinforcers was more similar to the residents than the exclusive-reinforcer group. All groups increase over time. 
@@ -1926,19 +1924,39 @@ The mean distance moved (and distance moved over time) for the mixed-reinforcers
 hist(datam1$daily_dist)
 ggqqplot(datam1$daily_dist)
 
-# test difference between the groups with interaction of time
-m1 <- lmer(daily_dist ~ social * scale(date) + (1|id), data = datam1)
-summary(m1)
-anova(m1)
+# test difference between the groups with interaction of time as a quadratic
+options(na.action = "na.fail")
+m1 <- glmmTMB(daily_dist ~ social * (scale(elapsed) + I(scale(elapsed)^2))+ (1|id), 
+              data = datam1)
+options(na.action = "na.omit")
 
-emmeans(m1, pairwise ~ social | date, adjust = "Tukey")
+# test difference between the groups with interaction of time
+m1 <- glmmTMB(daily_dist ~ social * scale(elapsed) + (1|id), 
+              data = datam1)
+
+# model selection
+dm1 <- dredge(m1)
+
+# print best model on AICc
+best1 <- get.models(dm1, delta==0)[[1]]
+summary(best1)
+
+# post-hoc tukey
+emmeans(best1, ~ social, type = "tukey", type = "response")
 
 # check residuals
-hist(residuals(m1))
-ggqqplot(residuals(m1))
+hist(residuals(best1))
+ggqqplot(residuals(best1))
+
+# plot effects
+plot_model(best1)
+
+# plot predictions
+pred <- ggeffects::predict_response(best1, terms = "social", cov.fit = FALSE)
+plot(pred)
 ```
 
-All founders moved greater distances per night with increasing time post release (estimate = 115.23, SE = 37.06, p= 0.0019) but this increase was steeper for residents (p = 0.0035) and mixed reinforcers (p = 0.0144) than exclusive reinforcers. 
+All founders moved greater distances per night with increasing time post release but this increase was steeper for residents and mixed reinforcers than exclusive reinforcers. 
 
 Increasing movement over time may indicate more effective exploitation of resources and/or larger area of exploitation.
 
@@ -1954,7 +1972,7 @@ datam2 <- read.csv("results/daily_distance_between_roosts.csv") %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add a time elapsed post-release variable
-  mutate(elapsed = date - as_date("2023-06-11")) %>%
+  mutate(elapsed = as.numeric(date - as_date("2023-06-11"))) %>%
   # add column for membership to social group
   mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
@@ -1969,26 +1987,23 @@ sum2 <- datam2 %>%
 # plot daily roost distance by social group
 ggplot(datam2)+
   geom_boxplot(aes(social,distance_previous))+
-  theme_minimal()+
-  xlab("Social group") + 
-  ylab("Daily distance between roosts (m)")
+  xlab("Social group")+ 
+  ylab("Daily distance between roosts (m)")+
+  theme_minimal()
 
 # plot daily roost distance over time as social group means
 ggplot(sum2)+
   geom_path(aes(date, distance_previous, color = social), linewidth = 1)+
-  theme_minimal() +
-  xlab("Date") + 
+  xlab("Days post-release")+ 
   ylab("Daily distance between roosts (m)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 
 # plot daily roost distance over time as linear model
 ggplot(datam2)+
   geom_smooth(aes(elapsed, distance_previous, color = social), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  xlab("Days post-release")+ 
   ylab("Daily distance between roosts (m)")+
-  scale_colour_viridis_d()+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 ```
 
 The mixed group converges with the residents, whereas the exclusive group continues to increase.
@@ -1999,12 +2014,14 @@ hist(datam2$distance_previous)
 ggqqplot(datam2$distance_previous)
 
 # correct left skew
-hist(log(datam2$distance_previous))
+hist(log1p(datam2$distance_previous))
 ggqqplot(log(datam2$distance_previous))
 
 # test whether establishment differs between the groups
-m2 <- lmer(log(distance_previous) ~ social * scale(date) + (1|id), data = datam2)
+m2 <- glmmTMB(log1p(distance_previous) ~ social * scale(date) + (1|id), data = datam2)
 summary(m2)
+
+plot_model(m2)
 
 # check residuals
 hist(residuals(m7))
@@ -2027,7 +2044,7 @@ datam3 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add a time elapsed post-release variable
-  mutate(elapsed = date - as_date("2023-06-11")) %>%
+  mutate(elapsed = as.numeric(date - as_date("2023-06-11"))) %>%
   # add column for membership to social group
   mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
@@ -2042,25 +2059,23 @@ sum3 <- datam3 %>%
 # plot release site distance by social group
 ggplot(datam3)+
   geom_boxplot(aes(social, dist_release))+
-  theme_minimal()+
-  xlab("Social group") + 
-  ylab("Distance from release site (m)")
+  xlab("Social group")+ 
+  ylab("Distance from release site (m)")+
+  theme_minimal()
 
 # plot release site distance over time as social group means
 ggplot(sum3)+
   geom_path(aes(date, dist_release, color = social), linewidth = 1)+
-  theme_minimal() +
-  xlab("Date") + 
+  xlab("Days post-release")+ 
   ylab("Distance from release site (m)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 
 # plot release site distance over time as linear model
 ggplot(datam3)+
   geom_smooth(aes(elapsed, dist_release, color = social), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  xlab("Days post-release")+ 
   ylab("Distance from release site (m)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 ```
 
 The reinforcers in the mixed group stayed similarly close to the release site as the residents (who were occupying an area of the woodland near the release site when the reinforcement translocation occurred), whereas the exclusive group left the area and went increasingly far from the release location.
@@ -2134,7 +2149,7 @@ datam4 <- read.csv("results/daily_hr_area.csv") %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add a time elapsed post-release variable
-  mutate(elapsed = date - as_date("2023-06-11")) %>%
+  mutate(elapsed = as.numeric(date - as_date("2023-06-11"))) %>%
   # add column for membership to social group
   mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
@@ -2149,25 +2164,23 @@ sum4 <- datam4 %>%
 # plot home range area by social group
 ggplot(datam4)+
   geom_boxplot(aes(social, area))+
-  theme_minimal()+
-  xlab("Social group") + 
-  ylab("Home range (50% KUD) area (ha)")
+  xlab("Social group")+ 
+  ylab("Home range (50% KUD) area (ha)")+
+  theme_minimal()
 
 # plot home range area over time as social group means
 ggplot(sum4)+
   geom_path(aes(date, area, color = social), linewidth = 1)+
-  theme_minimal() +
-  xlab("Date") + 
+  xlab("Days post-release")+ 
   ylab("Home range (50% KUD) area (ha)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 
 # plot home range area over time as linear model
 ggplot(datam4)+
   geom_smooth(aes(elapsed, area, color = social), method = "lm")+
-  theme_minimal() +
   xlab("Days post-release") + 
   ylab("Home range (50% KUD) area (ha)")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 ```
 
 The reinforcers in the mixed group stayed similarly close to the release site as the residents (who were occupying an area of the woodland near the release site when the reinforcement translocation occurred), whereas the exclusive group left the area and went increasingly far from the release location.
@@ -2206,7 +2219,7 @@ datam5 <- read.csv("results/daily_time_budget.csv") %>%
   # format dates as dates
   mutate(date = as_date(date)) %>%
   # add a time elapsed post-release variable
-  mutate(elapsed = date - as_date("2023-06-11")) %>%
+  mutate(elapsed = as.numeric(date - as_date("2023-06-11"))) %>%
   # add column for membership to social group
   mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
   # limit to reinforcement period
@@ -2227,26 +2240,23 @@ datam5bar <- datam5 %>%
 ggplot(datam5bar)+
   geom_bar(aes(x = social, y = proportion, fill = state),
            position="fill", stat="identity")+
-  theme_minimal()+
-  xlab("Social group") + 
+  xlab("Social group")+ 
   ylab("Time budget allocation")+
-  scale_fill_viridis_d()
+  theme_minimal()
 
 # plot foraging allocation over time as social group means
 ggplot(sum5)+
   geom_path(aes(date, foraging, color = social), linewidth = 1)+
-  theme_minimal() +
-  xlab("Date") + 
+  xlab("Days post-release")+ 
   ylab("Proportion of time budget allocated to foraging")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 
 # plot foraging allocation over time as linear model
 ggplot(datam5)+
   geom_smooth(aes(elapsed, state2p, color = social), method = "lm")+
-  theme_minimal() +
-  xlab("Days post-release") + 
+  xlab("Days post-release")+ 
   ylab("Proportion of time budget allocated to foraging")+
-  scale_colour_manual(values = c("#440154", "#F08080", "#FFD700"))
+  theme_minimal()
 ```
 
 The residents allocate around 50% of their time to foraging, compared to 65% for reinforcers. The reinforcers are very similar.
@@ -2320,7 +2330,6 @@ ggplot(datam6)+
 ggplot(datam6)+
   geom_path(aes(status, weight, colour = id, group = id))+
   theme_minimal()+
-  scale_colour_viridis_d()+
   facet_wrap(~social)
 
 # plot weight pre and post release by social group as a linear model
