@@ -2650,6 +2650,86 @@ dates <- c(pre_dates, post_dates)
 
 Do residents change their distance moved after reinforcement?
 
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam7 <- read.csv("results/daily_distance_moved.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as dates
+  mutate(date = as_date(date_bird)) %>%
+  # add quadractic term for time
+  mutate(date2 = as.numeric(date)^2) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# create social group means
+sum7 <- datam7 %>%
+  group_by(date) %>%
+  summarise(dist = mean(daily_dist),
+            upper = dist + std.error(daily_dist),
+            lower = dist - std.error(daily_dist)) %>%
+  arrange(date)
+
+# plot daily distance over time as social group means
+ggplot(sum7, aes(date, dist, ymin = lower, ymax = upper)) +
+  geom_path() +
+  geom_ribbon(alpha = 0.2) +
+  xlab("Days post-reinforcement") + 
+  ylab("Daily distance moved (m)") +
+  theme_minimal() +
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()+
+  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+
+# distribution of movement data
+hist(datam7$daily_dist)
+ggqqplot(datam7$daily_dist)
+
+# test difference between the groups with interaction of time as a quadratic
+m7 <- glmmTMB(daily_dist ~ period * (scale(date) + scale(date2))+ (1|id), 
+              data = datam7,
+              na.action = "na.fail")
+
+# model selection
+dm7 <- dredge(m7)
+
+# print best model on AICc
+best7 <- get.models(dm7, delta==0)[[1]]
+summary(best7)
+
+# check model
+check_model(best1)
+
+# post-hoc comparison of slopes
+emtrends(best1, pairwise ~ social, var = "elapsed")
+
+# plot effects
+plot_model(best1)
+
+# marginal effects 
+pred1 <- predict_response(best1, terms = c("elapsed", "social"))
+
+# plot predictions
+ggplot(pred1, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
+  geom_line(aes(colour = group))+
+  geom_ribbon(alpha = 0.2)+
+  xlab("Days post-reinforcement") + 
+  ylab("Predicted values of daily distance moved (m)") +
+  theme_minimal()+
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()
+```
+
+**Results:**
+
+
 ```{r}
 # read in data and filter to residents for reinforcement period
 datam7 <- read.csv("results/daily_distance_moved.csv") %>%
