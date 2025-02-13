@@ -71,7 +71,7 @@ mtr <- rbind(
 
 Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts and therefore have cohorts released into the presence of conspecifics. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
 
-Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour?
+Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour in response to reinforcement?
 
 ## Translocation
 
@@ -385,7 +385,7 @@ We apply all of the above steps to the full dataset.
 
 ### 1) Temporal filtering
 
-We removed points after the end of the study period (5/8/23 at the start of next experiment - translocation to Orana).
+We removed points after the end of the study period (60 days after  at the start of next experiment - translocation to Orana).
 
 ```{r}
 # Import data from movebank
@@ -1013,12 +1013,16 @@ data <- read.csv("data/data_cleaned.csv") %>%
 # set up data in spatial points dataframe
 locs <- SpatialPointsDataFrame(coordinates(
   cbind(data$easting, data$northing)), data = data)
+```
 
-# home range polygon per bird per day 🐢🐢 2.5 hours
+Core area 50% KUD
+
+```{r}
+# core range polygon per bird per day 🐢🐢 2.5 hours
 birds <- as.character(unique(data$id))
 days <- unique(locs[["date"]])
 
-hr_daily <- data.frame()
+hr50_daily <- data.frame()
 
 for (i in 1:length(birds)){
   for (j in 1:length(days)){
@@ -1037,15 +1041,52 @@ for (i in 1:length(birds)){
     
     print(head(kud_df_utm, n= 1L))
     
-    hr_daily <- rbind.data.frame(hr_daily, kud_df_utm)
+    hr50_daily <- rbind.data.frame(hr50_daily, kud_df_utm)
   }}
 
 # extract area per day i.e. drop geometry
-hr_area <- st_drop_geometry(hr_daily)
+hr50_area <- st_drop_geometry(hr50_daily)
 
 # save to file
-write.csv(hr_area, "results/daily_hr_area.csv", row.names = TRUE)
+write.csv(hr50_area, "results/daily_hr50_area.csv", row.names = TRUE)
 ```
+
+Home range 90% KUD - changed grid and extent to optimise, takes 1 hour now. 
+
+```{r}
+# home range polygon per bird per day 🐢🐢 2.5 hours
+birds <- as.character(unique(data$id))
+days <- unique(locs[["date"]])
+
+hr90_daily <- data.frame()
+
+for (i in 1:length(birds)){
+  for (j in 1:length(days)){
+    points <- subset(locs, id == birds[i] & date == days[j],
+                     select = id)
+    if (length(points)<5){
+      next
+    }
+    kud <- kernelUD(points[,1], h="href", grid=400, extent = 7) %>% 
+      getverticeshr(percent = 90)
+    
+    proj4string(kud) <- CRS("EPSG:32755")
+    
+    kud_df_utm <- st_as_sf(kud)%>%
+      mutate(date = days[j])
+    
+    print(head(kud_df_utm, n= 1L))
+    
+    hr90_daily <- rbind.data.frame(hr90_daily, kud_df_utm)
+  }}
+
+# extract area per day i.e. drop geometry
+hr90_area <- st_drop_geometry(hr90_daily)
+
+# save to file
+write.csv(hr90_area, "results/daily_hr90_area.csv", row.names = TRUE)
+```
+
 
 ## Time budget HMM
 
@@ -1088,7 +1129,7 @@ steps <- test %>%
 summarize_sampling_rate(steps)
 
 # resample track to 5 minutes
-track_resample(rate = minutes(5), tolerance = minutes(1))
+steps <- track_resample(steps, rate = minutes(5), tolerance = minutes(1))
 
 # step statistics
 hist(test$step, xlab = "step", main = "", breaks = 30)
@@ -1198,6 +1239,10 @@ for(i in 1:niter) {
   # Turning angle concentration
   angleCon0 <- runif(4, min = c(0.5, 3, 5, 3), max = c(3, 10, 15, 10))
   
+  # trying another angle concentration now I understand this
+  #angleCon0 <- runif(4, min = c(0.5, 0.1, 3, 5), max = c(3, 2, 10, 15))  
+  # no this was worse
+  
   # Parameter table
   parameters[[i]] <- data.frame(
     state = rep(1:4),
@@ -1267,6 +1312,9 @@ vedba       -3.345948  1.189772 -2.1410536  1.063941  1.259101 -3.388000
 $delta
                state 1   state 2      state 3      state 4
 ID:Nutmeg 0.0004158271 0.9993644 5.228222e-05 0.0001674458
+
+
+
 
 ### Run HMM
 
@@ -1447,6 +1495,27 @@ ggplot(budget)+
   facet_wrap(~cohort, scales="free_x")
 ```
 
+I had a follow up question which is how well vedba aligns with states - where I expect vedba to go 1 < 2 < 3 < 4
+
+```{r}
+# read in data with hmm states
+data_hmm <- read.csv("data/data_hmm.csv") %>%
+  mutate(states = as_factor(states))
+
+# plot
+ggplot(data_hmm)+
+  geom_boxplot(aes(states, vedba, group = states))
+
+# aov
+temp <- aov(vedba ~ states, data = data_hmm)
+summary(temp)
+
+# post hoc tukey
+TukeyHSD(temp)
+```
+
+VEDBA differed between all states except 1-2 comparison. But step lengths longer in state 2 than state 1.
+
 # Conspecific interactions
 
 The key issue addressed in this paper is whether social interaction occurs between residents and reinforcers, and if so whether this mediates post-release outcomes for the cohorts. 
@@ -1479,7 +1548,8 @@ sampling_rates <- steps %>%
   transmute(id, summary = map(data, summarize_sampling_rate)) %>%
   unnest(summary)
 
-mean(sampling_rates$mean)
+mean(sampling_rates$mean)*60
+mean(sampling_rates$sd)*60
 ```
 
 The mean sampling rate for the cleaned data is 8 minutes. We will use a time parameter of 4 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
@@ -1893,8 +1963,8 @@ datam1 <- read.csv("results/daily_distance_moved.csv") %>%
 sum1 <- datam1 %>%
   group_by(date, social) %>%
   summarise(dist = mean(daily_dist),
-            upper = dist + std.error(daily_dist),
-            lower = dist - std.error(daily_dist)) %>%
+            upper = dist + 1.96 * std.error(daily_dist),
+            lower = dist - 1.96 * std.error(daily_dist)) %>%
   arrange(date)
 
 # plot daily distance over time as social group means
@@ -1989,8 +2059,8 @@ datam2 <- read.csv("results/daily_distance_between_roosts.csv") %>%
 sum2 <- datam2 %>%
   group_by(date, social) %>%
   summarise(dist = mean(distance_previous),
-            upper = dist + std.error(distance_previous),
-            lower = dist - std.error(distance_previous)) %>%
+            upper = dist + 1.96 * std.error(distance_previous),
+            lower = dist - 1.96 * std.error(distance_previous)) %>%
   arrange(date)
 
 # plot roost displacement over time as social group means
@@ -2086,8 +2156,8 @@ datam3 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
 sum3 <- datam3 %>%
   group_by(date, social) %>%
   summarise(dist = mean(dist_release),
-            upper = dist + std.error(dist_release),
-            lower = dist - std.error(dist_release)) %>%
+            upper = dist + 1.96 * std.error(dist_release),
+            lower = dist - 1.96 * std.error(dist_release)) %>%
   arrange(date)
 
 # plot distance from release site over time as social group means
@@ -2201,11 +2271,11 @@ ggmap(map_z15)+
 
 ### m4: Home range size
 
-Does home range size differ between the social groups?
+Does home range size differ between the social groups? Using 90% KUD because interested in full range of exploration/exploitation under PRBM. 
 
 ```{r}
 # read in data and filter to reinforcement period
-datam4 <- read.csv("results/daily_hr_area.csv") %>%
+datam4 <- read.csv("results/daily_hr90_area.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # format dates as dates
@@ -2223,16 +2293,22 @@ datam4 <- read.csv("results/daily_hr_area.csv") %>%
 sum4 <- datam4 %>%
   group_by(date, social) %>%
   summarise(dist = mean(area),
-            upper = dist + std.error(area),
-            lower = dist - std.error(area)) %>%
+            upper = dist + 1.96 * std.error(area),
+            lower = dist - 1.96 * std.error(area)) %>%
   arrange(date)
+
+# and overall means
+mean4 <- datam4 %>%
+  group_by(social) %>%
+  summarise(mean = mean(area),
+            se = std.error(area))
 
 # plot homer range size over time as social group means
 ggplot(sum4, aes(date, dist, ymin = lower, ymax = upper)) +
   geom_path(aes(colour = social)) +
   geom_ribbon(aes(fill = social), alpha = 0.2) +
   xlab("Days post-reinforcement") + 
-  ylab("Home range 50% KUD (ha)") +
+  ylab("Home range 90% KUD (ha)") +
   theme_minimal() +
   scale_fill_viridis_d()+
   scale_colour_viridis_d()
@@ -2290,7 +2366,7 @@ ggplot(pred4, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)
 **Results:**
 The best fitting model included social group and time (linear and quadratic), the interaction between these, and individual as a random effect.
 
-No linear effect (i.e. no increase over time). However, the quadratic term is significant and negative (estimate: -0.20688 ± 0.0366, p < 0.001) i.e., an initial increase followed by a decrease, although the trend over time varies across social groups. The mixed reinforcers show a slight deceleration (-0.095, p = 0.045) and the exclusive reinforcers show a stronger deceleration  (-0.17, p < 0.001) compared to residents. Exclusive reinforcers decrease home range size singificatly more than both other groups (p < 0.0002).
+No linear effect (i.e. no increase over time). However, the quadratic term is significant and negative (estimate: -0.19704 ± 0.04181, p < 0.001) i.e., an initial increase followed by a decrease, although the trend over time varies across social groups. The mixed reinforcers show a quadratic effect (-0.1248, p = 0.0213) and the exclusive reinforcers show a stronger quadratic effect (-0.2026, p < 0.001) compared to residents. Exclusive reinforcers decrease home range size significantly more than both other groups (p < 0.0002).
 
 All groups have significantly different home range size. 
 
@@ -2323,9 +2399,15 @@ datam5 <- read.csv("results/daily_time_budget.csv") %>%
 sum5 <- datam5 %>%
   group_by(date, social) %>%
   summarise(dist = mean(state2p),
-            upper = dist + std.error(state2p),
-            lower = dist - std.error(state2p)) %>%
+            upper = dist + 1.96 * std.error(state2p),
+            lower = dist - 1.96 * std.error(state2p)) %>%
   arrange(date)
+
+# overall means
+mean5 <- datam5 %>%
+  group_by(social) %>%
+  summarise(mean = mean(state2p),
+            se = std.error(state2p))
 
 # and pivot longer for barchart
 datam5bar <- datam5 %>%
@@ -2689,8 +2771,8 @@ datam7 <- read.csv("results/daily_distance_moved.csv") %>%
 sum7 <- datam7 %>%
   group_by(date) %>%
   summarise(dist = mean(daily_dist),
-            upper = dist + std.error(daily_dist),
-            lower = dist - std.error(daily_dist)) %>%
+            upper = dist + 1.96 * std.error(daily_dist),
+            lower = dist - 1.96 * std.error(daily_dist)) %>%
   arrange(date)
 
 # plot daily distance over time as social group means
@@ -2789,151 +2871,9 @@ ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper, group = period)) 
 
 Do residents change their distance between roosts after reinforcement?
 
-```{r}
-# read in data and filter to residents for reinforcement period
-datam8 <- read.csv("results/daily_distance_between_roosts.csv") %>%
-  # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
-  # select only residents
-  filter(cohort == "Resident") %>%
-  # format dates as dates
-  mutate(date = as_date(date)) %>%
-  # limit to reinforcement period
-  filter(date %in% dates) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement"))) %>%
-  # without major outliers from Nutmeg beyond the fence
-  filter(distance_previous < 2000)
-
-# create cohort mean
-sum8 <- datam8 %>%
-  group_by(date) %>%
-  summarise(distance_previous = mean(distance_previous)) %>%
-  arrange(date) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement")))
-
-# plot means
-ggplot(datam8)+
-  geom_boxplot(aes(period, distance_previous))+
-  theme_minimal()
-
-# plot residents over time
-ggplot(sum8)+
-  geom_path(aes(date, distance_previous))+
-  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")+
-  theme_minimal() +
-  xlab("Date") + 
-  ylab("Distance between consecutive roosts (m)")
-
-# plot as a linear model
-ggplot(datam8)+
-  geom_smooth(aes(date, distance_previous, colour = period), method = "lm")+
-  theme_minimal()+
-  xlab("Date") + 
-  ylab("Distance between consecutive roosts (m)")
-```
-
-The linear model plot is a bit misleading because it's adding a trendline to what is basically static and then a spike either side of release - also I'm unsure why there is a spike just before release. Maybe because I was in the reserve and bothering them?
-
-```{r}
-# summarise to period
-per8 <- datam8 %>%
-  group_by(period, id) %>%
-  summarise(distance_previous = mean(distance_previous))
-
-# distribution of movement data
-hist(per8$distance_previous)
-ggqqplot(per8$distance_previous)
-
-# test difference between the groups with interaction of time
-m8 <- lmer(distance_previous ~ period + (1|id), data = per8)
-summary(m8)
-
-# check residuals
-hist(residuals(m8))
-ggqqplot(residuals(m8))
-```
-
-No difference in roost site displacement.
-
 ## m9: Release-site fidelity
 
 Do residents change their distance from the release site after reinforcement?
-
-```{r}
-# read in data and filter to residents for reinforcement period
-datam9 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
-  # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
-  # select only residents
-  filter(cohort == "Resident") %>%
-  # format dates as dates
-  mutate(date = as_date(date)) %>%
-  # limit to reinforcement period
-  filter(date %in% dates) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement")))
-
-# create cohort mean
-sum9 <- datam9 %>%
-  group_by(date) %>%
-  summarise(dist_release = mean(dist_release)) %>%
-  arrange(date) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement")))
-
-# plot means
-ggplot(datam9)+
-  geom_boxplot(aes(period, dist_release))+
-  theme_minimal()
-
-# plot residents over time
-ggplot(sum9)+
-  geom_path(aes(date, dist_release))+
-  geom_vline(aes(xintercept = as_date("2023-06-06")), colour = "purple")+
-  theme_minimal() +
-  xlab("Date") + 
-  ylab("Distance from release site (m)")
-
-# plot as a linear model
-ggplot(datam9)+
-  geom_smooth(aes(date, dist_release, colour = period), method = "lm")+
-  theme_minimal() +
-  xlab("Date") + 
-  ylab("Distance from release site (m)")
-```
-
-The residents had already gradually been moving back in from zone 2 to zone 1 but the reinforcement attracted them to the central woodland north of the release site. 
-
-```{r}
-# summarise to period
-per9 <- datam9 %>%
-  group_by(period, id) %>%
-  summarise(dist_release = mean(dist_release))
-
-# distribution of movement data
-hist(per9$dist_release)
-ggqqplot(per9$dist_release)
-
-# test difference between the groups with interaction of time
-m9 <- lmer(dist_release ~ period + (1|id), data = per9)
-summary(m9)
-
-# check residuals
-hist(residuals(m9))
-ggqqplot(residuals(m9))
-```
-
-Not the best model and weird distribution of data. There is a difference in how far they are from the release site post-release (0.000356).
 
 ### Resident change map
 
@@ -2964,78 +2904,6 @@ ggmap(map_z15)+
 ## m10: Home range size
 
 Do residents change their home range size after reinforcement?
-
-```{r}
-# read in data and filter to residents for reinforcement period
-datam10 <- read.csv("results/daily_hr_area.csv") %>%
-  # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
-  # select only residents
-  filter(cohort == "Resident") %>%
-  # format dates as dates
-  mutate(date = as_date(date)) %>%
-  # limit to reinforcement period
-  filter(date %in% dates) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement"))) %>%
-  # remove crazy outlier from Nutmeg's excursion
-  filter(area < 100)
-
-# create cohort mean
-sum10 <- datam10 %>%
-  group_by(date) %>%
-  summarise(area = mean(area)) %>%
-  arrange(date) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement")))
-
-# plot means
-ggplot(datam10)+
-  geom_boxplot(aes(period, area))+
-  theme_minimal()
-
-# plot residents over time
-ggplot(sum10)+
-  geom_path(aes(date, area))+
-  geom_vline(aes(xintercept = as_date("2023-06-06")), colour = "purple")+
-  theme_minimal() +
-  xlab("Date") + 
-  ylab("Home range size (ha)")
-
-# plot as a linear model
-ggplot(datam10)+
-  geom_smooth(aes(date, area, colour = period), method = "lm")+
-  theme_minimal() +
-  xlab("Date") + 
-  ylab("Home range size (ha)")
-```
-
-Doesn't look like much difference.
-
-```{r}
-# summarise to period
-per10 <- datam10 %>%
-  group_by(period, id) %>%
-  summarise(area = mean(area))
-
-# distribution of movement data
-hist(per10$area)
-ggqqplot(per10$area)
-
-# test difference between the groups with interaction of time
-m10 <- lmer(area ~ period + (1|id), data = per10)
-summary(m10)
-
-# check residuals
-hist(residuals(m10))
-ggqqplot(residuals(m10))
-```
-
-No difference. 
 
 ## Time over the fence
 
