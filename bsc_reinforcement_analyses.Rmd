@@ -13,12 +13,14 @@ knitr::opts_chunk$set(echo = TRUE)
 # Packages
 pacman::p_load(adehabitatHR, amt, atlastools, beepr, effects, emmeans, ggeffects, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, performance, plotrix, readxl, scales, scattermore, sf, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
 
-# Google API key for ggmaps
+# Google and STadia API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
 
-# Background map MR zones 1 and 2
+# Background maps MR zones 1 and 2
+map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
 map_z14 <- get_map(c(144.4380, -37.9000), zoom=14, maptype = "satellite")
 map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
+map_z16 <- get_map(c(144.4380, -37.9000), zoom=16, maptype = "satellite")
 
 # Metadata - translocation information
 metadata  <- read.csv("data/metadata.csv") %>%
@@ -1118,7 +1120,7 @@ Create a test subset of one bird for one month (Nutmeg in June 2023). Investigat
 ```{r}
 # Test subset, Nutmeg 1 month
 dates <- seq(as.Date("2023-06-01"), as.Date("2023-07-01"), "days")
-test <- filter(data_hmm, id == "Aurora" & date_bird %in% dates)
+test <- filter(data_hmm, id == "Nutmeg" & date_bird %in% dates)
 
 # format as amt and calculate step lengths
 steps <- test %>%
@@ -1312,9 +1314,6 @@ vedba       -3.345948  1.189772 -2.1410536  1.063941  1.259101 -3.388000
 $delta
                state 1   state 2      state 3      state 4
 ID:Nutmeg 0.0004158271 0.9993644 5.228222e-05 0.0001674458
-
-
-
 
 ### Run HMM
 
@@ -1515,6 +1514,86 @@ TukeyHSD(temp)
 ```
 
 VEDBA differed between all states except 1-2 comparison. But step lengths longer in state 2 than state 1.
+
+### HMM example map
+
+Want to include a figure with sample state movements, for a flying and non flying bird. 
+
+```{r}
+# hmm subset, Nutmeg 1 week
+dates1 <- seq(as.Date("2023-04-22"), as.Date("2023-05-01"), "days")
+
+sample_hmm1 <- read.csv("data/data_hmm.csv") %>%
+  filter(ID == "Nutmeg" & date_bird %in% dates1) %>%
+  mutate(states = as_factor(states)) %>%
+  arrange(date)
+
+## create segments to colour path
+segments1 <- sample_hmm1 %>%
+  mutate(next_lon = lead(longitude),
+         next_lat = lead(latitude),
+         next_state = lead(states)) %>%
+  filter(!is.na(next_lon))
+
+## plot on ggmap background
+map1 <- ggmap(map_z14) +
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash") +
+  geom_segment(data = segments1, 
+               aes(x = longitude, y = latitude,
+                   xend = next_lon, yend = next_lat,
+                   color = states)) +
+  geom_point(data = sample_hmm1, aes(longitude, latitude, colour = states)) +
+  scale_colour_viridis_d() +
+  theme_void()+
+  annotation_north_arrow(location = "tr", 
+                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
+  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
+
+# hmm subset, Fauna 1 week
+dates2 <- seq(as.Date("2023-06-07"), as.Date("2023-06-14"), "days")
+
+sample_hmm2 <- read.csv("data/data_hmm.csv") %>%
+  filter(ID == "Fauna" & date_bird %in% dates2) %>%
+  mutate(states = as_factor(states)) %>%
+  arrange(date)
+
+## create segments to colour path
+segments2 <- sample_hmm2 %>%
+  mutate(next_lon = lead(longitude),
+         next_lat = lead(latitude),
+         next_state = lead(states)) %>%
+  filter(!is.na(next_lon))
+
+## plot on ggmap background
+map2 <- ggmap(map_z15) +
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash") +
+  geom_segment(data = segments2, 
+               aes(x = longitude, y = latitude,
+                   xend = next_lon, yend = next_lat,
+                   color = states)) +
+  geom_point(data = sample_hmm2, aes(longitude, latitude, colour = states)) +
+  scale_colour_viridis_d() +
+  theme_void()+
+  annotation_north_arrow(location = "tr", 
+                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
+  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
+
+# multi plot
+ggarrange(map1, map2,
+          ncol = 2, nrow = 1,
+          labels = c("A", "B"),
+          common.legend = TRUE, legend = "bottom")
+```
 
 # Conspecific interactions
 
@@ -2255,9 +2334,9 @@ ggmap(map_z15)+
   scale_colour_viridis_c(trans = "date", name = "2023")+
   theme_void()+
   scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
-  theme(legend.position="bottom",
-        legend.key.width = unit(3, 'cm'),
-        strip.text = element_text(size = 13))+
+  #theme(legend.position="bottom",
+        #legend.key.width = unit(3, 'cm'),
+        #strip.text = element_text(size = 13))+
   # add north in just the resident facet panel
   annotation_north_arrow(data  = subset(datam2, social == "Resident"),
                          location = "tr", 
@@ -2763,9 +2842,7 @@ datam7 <- read.csv("results/daily_distance_moved.csv") %>%
   # add column for pre or post release
   mutate(period = factor(ifelse(date %in% pre_dates, 
                          "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement"))) %>%
-  # format date as numeric
-  mutate(date = as.numeric(date))
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
 
 # create social group means
 sum7 <- datam7 %>%
@@ -2775,7 +2852,7 @@ sum7 <- datam7 %>%
             lower = dist - 1.96 * std.error(daily_dist)) %>%
   arrange(date)
 
-# plot daily distance over time as social group means
+# plot daily distance over time as period means
 ggplot(sum7, aes(date, dist, ymin = lower, ymax = upper)) +
   geom_path() +
   geom_ribbon(alpha = 0.2) +
@@ -2791,7 +2868,7 @@ hist(datam7$daily_dist)
 ggqqplot(datam7$daily_dist)
 
 # test difference pre and post reinforcement
-m7 <- glmmTMB(daily_dist ~ period * (scale(date) + I(scale(date)^2)) + (1|id), 
+m7 <- glmmTMB(daily_dist ~ period * (scale(as.numeric(date))) + (1|id), 
               data = datam7,
               na.action = "na.fail")
 
@@ -2813,21 +2890,13 @@ summary(best7)
 plot_model(best7)
 ```
 
-**Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor.
-
-Residents moved significantly less distance post reinforcement and the trend was different. 
-
-**Interpretation:**
-
-
 **Plot**
 
 Unlike the reinforcer data, we are comparing the residents pre- and post-reinforcement. So the predictions need to be bounded into valid date range. 
 
 ```{r}
 # Generate prediction data only within valid date ranges
-release_date <- as.numeric(as_date("2023-06-07"))
+release_date <- as_date("2023-06-07")
 
 pred_data_pre <- expand.grid(
   date = seq(min(datam7$date[datam7$period == "pre-reinforcement"]),
@@ -2857,23 +2926,269 @@ pred7 <- pred7 %>%
   mutate(date = as_date(date))
 
 # plot predictions
-ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper, group = period)) +
-  geom_line(aes(colour = period))+
-  geom_ribbon(aes(fill = period), alpha = 0.2)+
+ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
+  geom_line()+
+  geom_ribbon(alpha = 0.2)+
   xlab(element_blank()) + 
   ylab("Predicted values of daily distance moved (m)") +
   theme_minimal()+
-  scale_fill_viridis_d()+
-  scale_colour_viridis_d()
+  facet_wrap(~period, scales = "free_x")
 ```
+
+**Results:**
+The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+
+Residents moved significantly less distance post reinforcement and the trend was different. 
+
+On average, residents moved 1028m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+
+**Interpretation:**
+The residents changed their distance moved, perhaps to accommodate the reinforcers who could not immediately move as far. They slowly increased their distance moved to pre-reinforcement levels. 
 
 ## m8: Roost fidelty
 
 Do residents change their distance between roosts after reinforcement?
 
+```{r}
+# read in data and filter to residents for reinforcement period
+datam8 <- read.csv("results/daily_distance_between_roosts.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as numeric
+  mutate(date = as_date(date)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# create social group means
+sum8 <- datam8 %>%
+  group_by(date) %>%
+  summarise(dist = mean(distance_previous),
+            upper = dist + 1.96 * std.error(distance_previous),
+            lower = dist - 1.96 * std.error(distance_previous)) %>%
+  arrange(date)
+
+# plot daily distance over time as period means
+ggplot(sum8, aes(date, dist, ymin = lower, ymax = upper)) +
+  geom_path() +
+  geom_ribbon(alpha = 0.2) +
+  xlab("Days post-reinforcement") + 
+  ylab("Distance between consecutive roosts (m)") +
+  theme_minimal() +
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()+
+  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+
+# distribution of movement data
+hist(datam8$distance_previous)
+ggqqplot(datam8$distance_previous)
+
+# correct left skew
+hist(log1p(datam8$distance_previous))
+ggqqplot(log1p(datam8$distance_previous))
+
+# test difference pre and post reinforcement
+m8 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date))) + (1|id), 
+              data = datam8,
+              na.action = "na.fail")
+
+# model selection
+dm8 <- dredge(m8)
+dm8
+
+# parsimonious model where delta <2 and fewest predictors 
+# in this case only one model (top ranked) had delta AICc <2
+best8 <- get.models(dm8, delta<2)[[1]]
+
+# check model
+check_model(best8)
+
+# summary
+summary(best8)
+
+# plot effects
+plot_model(best8)
+```
+
+**Plot**
+
+```{r}
+# Generate prediction data only within valid date ranges
+release_date <- as_date("2023-06-07")
+
+pred_data_pre <- expand.grid(
+  date = seq(min(datam8$date[datam8$period == "pre-reinforcement"]),
+             release_date - 1, by = 1),
+  period = "pre-reinforcement"
+)
+
+pred_data_post <- expand.grid(
+  date = seq(release_date, max(datam8$date[datam8$period == "post-reinforcement"]), by = 1),
+  period = "post-reinforcement"
+)
+
+# Combine and add necessary covariates (date2, id, etc.)
+pred8 <- rbind(pred_data_pre, pred_data_post) %>%
+  mutate(id = NA)
+
+# Predict values using the valid dataset
+values8 <- predict(best8, newdata = pred8, type = "response", se.fit = TRUE) %>%
+  as.data.frame() 
+
+# Add predictions to dataframe - back transform the log values using exponential
+pred8 <- pred8 %>%
+  mutate(
+    predicted = expm1(values8$fit),
+    lower = expm1(values8$fit - 1.96 * values8$se.fit),
+    upper = expm1(values8$fit + 1.96 * values8$se.fit)
+  ) %>%
+  mutate(date = as_date(date))
+
+# plot predictions
+ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
+  geom_line()+
+  geom_ribbon(alpha = 0.2)+
+  xlab(element_blank()) + 
+  ylab("Predicted values of roost fidelity (m)") +
+  theme_minimal()+
+  facet_wrap(~period, scales = "free_x")
+```
+
+**Results:**
+The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+
+Residents moved significantly further between roosts immediately post-release, before settling. 
+
+On average, residents moved 1028m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+
+**Interpretation:**
+The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. 
+
 ## m9: Release-site fidelity
 
 Do residents change their distance from the release site after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam9 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
+ # add metadata
+ left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+ # select only residents
+ filter(cohort == "Resident") %>%
+ # format dates as numeric
+ mutate(date = as_date(date)) %>%
+ # limit to reinforcement period
+ filter(date %in% dates) %>%
+ # add column for pre or post release
+ mutate(period = factor(ifelse(date %in% pre_dates, 
+                        "pre-reinforcement", "post-reinforcement"),
+                        levels  = c("pre-reinforcement", "post-reinforcement")))
+# create social group means
+sum9 <- datam9 %>%
+ group_by(date) %>%
+ summarise(dist = mean(dist_release),
+           upper = dist + 1.96 * std.error(dist_release),
+           lower = dist - 1.96 * std.error(dist_release)) %>%
+ arrange(date)
+
+# plot daily distance over time as period means
+ggplot(sum9, aes(date, dist, ymin = lower, ymax = upper)) +
+ geom_path() +
+ geom_ribbon(alpha = 0.2) +
+ xlab("Days post-reinforcement") + 
+ ylab("Distance from release site (m)") +
+ theme_minimal() +
+ scale_fill_viridis_d()+
+ scale_colour_viridis_d()+
+ geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+
+# distribution of movement data
+hist(datam9$dist_release)
+ggqqplot(datam9$dist_release)
+
+# correct left skew - not perfect but okay
+hist(log1p(datam9$dist_release))
+ggqqplot(log1p(datam9$dist_release))
+
+# test difference pre and post reinforcement
+m9 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date))) + (1|id), 
+             data = datam9,
+             na.action = "na.fail")
+
+# model selection
+dm9 <- dredge(m9)
+dm9
+
+# parsimonious model where delta <2 and fewest predictors 
+# in this case only one model (top ranked) had delta AICc <2
+best9 <- get.models(dm9, delta<2)[[1]]
+
+# check model
+check_model(best9)
+
+# summary
+summary(best9)
+
+# plot effects
+plot_model(best9)
+```
+
+**Plot**
+
+```{r}
+# Generate prediction data only within valid date ranges
+release_date <- as_date("2023-06-07")
+
+pred_data_pre <- expand.grid(
+ date = seq(min(datam9$date[datam9$period == "pre-reinforcement"]),
+            release_date - 1, by = 1),
+ period = "pre-reinforcement"
+)
+
+pred_data_post <- expand.grid(
+ date = seq(release_date, max(datam9$date[datam9$period == "post-reinforcement"]), by = 1),
+ period = "post-reinforcement"
+)
+
+# Combine and add necessary covariates (date2, id, etc.)
+pred9 <- rbind(pred_data_pre, pred_data_post) %>%
+ mutate(id = NA)
+
+# Predict values using the valid dataset
+values9 <- predict(best9, newdata = pred9, type = "response", se.fit = TRUE) %>%
+ as.data.frame() 
+
+# Add predictions to dataframe - back transform the log values using exponential
+pred9 <- pred9 %>%
+ mutate(
+   predicted = expm1(values9$fit),
+   lower = expm1(values9$fit - 1.96 * values9$se.fit),
+   upper = expm1(values9$fit + 1.96 * values9$se.fit)
+ ) %>%
+ mutate(date = as_date(date))
+
+# plot predictions
+ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
+ geom_line()+
+ geom_ribbon(alpha = 0.2)+
+ xlab(element_blank()) + 
+ ylab("Predicted values of roost fidelity (m)") +
+ theme_minimal()+
+ facet_wrap(~period, scales = "free_x")
+```
+
+**Results:**
+The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+
+Residents were significantly closer to the release site post-reinforcement. The effect of time was overall a decline in distance, but post-reinforcement showed a positive trend of time that differed from pre-reinforcement.
+
+**Interpretation:**
+The residents were already moving back towards the release area, but this was enhanced by the addition of the reinforcers. 
 
 ### Resident change map
 
@@ -2904,6 +3219,123 @@ ggmap(map_z15)+
 ## m10: Home range size
 
 Do residents change their home range size after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam10 <- read.csv("results/daily_hr90_area.csv") %>%
+ # add metadata
+ left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+ # select only residents
+ filter(cohort == "Resident") %>%
+ # format dates as numeric
+ mutate(date = as_date(date)) %>%
+ # limit to reinforcement period
+ filter(date %in% dates) %>%
+ # add column for pre or post release
+ mutate(period = factor(ifelse(date %in% pre_dates, 
+                        "pre-reinforcement", "post-reinforcement"),
+                        levels  = c("pre-reinforcement", "post-reinforcement")))
+# create social group means
+sum10 <- datam10 %>%
+ group_by(date) %>%
+ summarise(dist = mean(area),
+           upper = dist + 1.96 * std.error(area),
+           lower = dist - 1.96 * std.error(area)) %>%
+ arrange(date)
+
+# plot daily distance over time as period means
+ggplot(sum10, aes(date, dist, ymin = lower, ymax = upper)) +
+ geom_path() +
+ geom_ribbon(alpha = 0.2) +
+ xlab("Days post-reinforcement") + 
+ ylab("Home range (90% KUD) area (ha)") +
+ theme_minimal() +
+ scale_fill_viridis_d()+
+ scale_colour_viridis_d()+
+ geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+
+# distribution of movement data
+hist(datam10$area)
+ggqqplot(datam10$area)
+
+# correct left skew
+hist(log1p(datam10$area))
+ggqqplot(log1p(datam10$area))
+
+# test difference pre and post reinforcement
+m10 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date))) + (1|id), 
+             data = datam10,
+             na.action = "na.fail")
+
+# model selection# moarea()del selection
+dm10 <- dredge(m10)
+dm10
+
+# parsimonious model where delta <2 and fewest predictors 
+# in this case only one model (top ranked) had delta AICc <2
+best10 <- get.models(dm10, delta<2)[[1]]
+
+# check model
+check_model(best10)
+
+# summary
+summary(best10)
+
+# plot effects
+plot_model(best10)
+```
+
+**Plot**
+
+```{r}
+# Generate prediction data only within valid date ranges
+release_date <- as_date("2023-06-07")
+
+pred_data_pre <- expand.grid(
+ date = seq(min(datam10$date[datam10$period == "pre-reinforcement"]),
+            release_date - 1, by = 1),
+ period = "pre-reinforcement"
+)
+
+pred_data_post <- expand.grid(
+ date = seq(release_date, max(datam10$date[datam10$period == "post-reinforcement"]), by = 1),
+ period = "post-reinforcement"
+)
+
+# Combine and add necessary covariates (date2, id, etc.)
+pred10 <- rbind(pred_data_pre, pred_data_post) %>%
+ mutate(id = NA)
+
+# Predict values using the valid dataset
+values10 <- predict(best10, newdata = pred10, type = "response", se.fit = TRUE) %>%
+ as.data.frame() 
+
+# Add predictions to dataframe - back transform the log values using exponential
+pred10 <- pred10 %>%
+ mutate(
+   predicted = expm1(values10$fit),
+   lower = expm1(values10$fit - 1.96 * values10$se.fit),
+   upper = expm1(values10$fit + 1.96 * values10$se.fit)
+ ) %>%
+ mutate(date = as_date(date))
+
+# plot predictions
+ggplot(pred10, aes(date, predicted, ymin = lower, ymax = upper)) +
+ geom_line()+
+ geom_ribbon(alpha = 0.2)+
+ xlab(element_blank()) + 
+ ylab("Predicted values of home range size (ha)") +
+ theme_minimal()+
+ facet_wrap(~period, scales = "free_x")
+```
+
+**Results:**
+The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+
+Home range was significantly smaller post-reinforcement. Pre-reinforcement increased with time whereas post-reinforcement was stable (slight decrease). 
+
+**Interpretation:**
+Contrary to hypothesis, they did not need bigger home range to compensate for competition. They actually stabilised their home range size. The increase April to June may have been due to seasonal food availability. 
 
 ## Time over the fence
 
@@ -2946,6 +3378,45 @@ excursion <- outside %>%
 ```
 
 It's really only Nutmeg and Marmalade with flight at this stage, so insufficient replication to answer this question.
+
+## Figure
+
+```{r}
+# default theme options for all plots
+theme <- function(){
+  list(
+    geom_line(),
+    geom_ribbon(alpha = 0.2),
+    xlab(element_blank()),
+    scale_x_date(date_breaks = "1 month", date_labels = "%b"),
+    theme_classic(),
+    ggplot2::theme(axis.title.y = element_text(size = 10)),
+    facet_wrap(~period, scales = "free_x")
+  )
+}
+
+# list of plots
+g7 <- ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Daily distance moved (m)") +
+  theme()
+
+g8 <- ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Roost displacement (m)") +
+  theme()
+
+g9 <- ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Distance from release (m)") +
+  theme()
+
+g10 <- ggplot(pred10, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Home range area (ha)") +
+  theme()
+
+# multi plot 2x2
+ggarrange(g7, g8, g9, g10,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"))
+```
 
 # Survival analysis
 
