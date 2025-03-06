@@ -11,10 +11,12 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, effects, emmeans, ggeffects, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, performance, plotrix, readxl, scales, scattermore, sf, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, cowplot, effects, emmeans, ggeffects, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, ozmaps, patchwork, performance, plotrix, readxl, scales, scattermore, sf, showtext, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, tmap, viridis, wildlifeDI)
 
 # Google and STadia API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
+
+ggmap::register_stadiamaps(key = readChar("apikey_stadia.txt", nchars = file.info("apikey_stadia.txt")$size))
 
 # Background maps MR zones 1 and 2
 map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
@@ -49,11 +51,12 @@ mtr <- rbind(
   c(-37.896726, 144.446099), # Z2/Z3 boundary bend 2
   c(-37.897964, 144.445706), # Z2/Z3 boundary bend 3
   c(-37.899960, 144.444517), # S end of Z2/Z3 boundary, i.e. SE corner
-  c(-37.899908, 144.444288), # Z2/btrw NE corner
-  c(-37.898280, 144.440662), # Z1/btrw pen NW corner
+  # hashed lines are to remove the gap of the rock wallaby pen
+  #c(-37.899908, 144.444288), # Z2/btrw NE corner
+  #c(-37.898280, 144.440662), # Z1/btrw pen NW corner
   ## zone 1
-  c(-37.900692, 144.440368), # Z1/btrw SW corner
-  c(-37.902610, 144.443002), # Z1/btrw SE corner
+  #c(-37.900692, 144.440368), # Z1/btrw SW corner
+  #c(-37.902610, 144.443002), # Z1/btrw SE corner
   c(-37.909538, 144.439648), # Z1 SE corner
   c(-37.908999, 144.434965), # Z1 southern boundary bend 1
   c(-37.907537, 144.433359), # Z1 southern boundary bend 2
@@ -64,8 +67,7 @@ mtr <- rbind(
   ) %>%  vect(type = "polygons", crs = "EPSG:4326") %>% 
   # transpose
   t() %>%
-  # add a buffer for GPS accuracy of 30m for analysis, and 10m for mapping
-  #buffer(10)
+  # add a buffer for GPS accuracy of 30m for analysis, set to 0m for mapping
   buffer(30)
 ```
 
@@ -74,6 +76,97 @@ mtr <- rbind(
 Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts and therefore have cohorts released into the presence of conspecifics. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
 
 Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour in response to reinforcement?
+
+## Study site
+
+Mt Rothwell Biodiversity Information Center (-37.8957, 144.4384, hereafter: Mt Rothwell), is a 473ha predator-exclusion fenced sanctuary and captive breeding facility in Victoria, on the traditional lands of the Wathawurrung people. Mt Rothwell is managed by the Odonata Foundation as part of a sanctuary network in southeast Australia. The sanctuary is free from the red fox, Vulpes vulpes, and feral cat, Felis catus, which are exotic predators that have contributed to the decline of Australian wildlife .
+
+Here I make an map of the site with an Australia context inset for publication.
+
+```{r}
+# shapefile of states
+aus <- ozmap("states") %>%
+  vect()
+
+lgas <- ozmap("abs_lga") %>%
+  vect()
+
+vic <- aus %>% dplyr::filter(grepl("Victoria", NAME))
+
+# aus inset map
+ausmap <- ggplot()+
+  geom_sf(data = aus, fill = NA)+
+  geom_sf(data = vic)+
+  theme_void()+
+  labs()+
+  xlim(112,155)+ 
+  ggplot2::theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "white")
+  )
+
+# vic inset map
+vicmap <- ggplot()+
+  geom_sf(data = vic)+
+  geom_rect(aes(xmin = 144.2025199, xmax = 144.7196691, 
+                ymin = -38.3025956, ymax = -37.8048911), 
+            colour = "darkgreen", fill = NA,
+            linewidth = 1)+
+  theme_void()+
+  labs()+ 
+  ggplot2::theme(
+    panel.border = element_rect(fill = NA, colour = "black"),
+    plot.background = element_rect(fill = "white")
+  )
+
+# study area stadia map
+map_geelong <- get_stadiamap(c(left = 144.225, right = 144.743, 
+                           bottom = -38.255, top =  -37.805),
+                         zoom=11, maptype = "stamen_terrain")
+
+geelong <- ggmap(map_geelong)+
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "black",
+                  linewidth = 1)+
+  xlab("Longitude")+
+  ylab("Latitude")+
+  ggplot2::theme(plot.margin = margin(0.1,6,0.1,0.2, "cm"))+ #top, right, bottom, left
+  annotation_north_arrow(location = "br", 
+                         pad_x = unit(0.2, "cm"), pad_y = unit(1, "cm"),
+                         height = unit(1, "cm"), width = unit(1, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(location = "br",
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"),
+                   text_col = "black")
+
+geelong
+
+# plot map and insets
+ggdraw()+
+  draw_plot(geelong)+
+  draw_plot(ausmap, x = 0.70, y = 0.55, width = 0.3, height = 0.3)+
+  draw_plot(vicmap, x = 0.716, y = 0.28, width = 0.2679, height = 0.2679)+
+  draw_label("Mt Rothwell", x = 0.345, y = 0.805, size = 12)
+  
+# save
+ggsave("study_site.png", dpi = 800)
+```
+
+Not using but keeping here, closer map of site with You Yangs context. 
+
+```{r}
+map_mtr <- get_stadiamap(c(left = 144.375, right = 144.490, 
+                           bottom = -37.975, top =  -37.865),
+                         zoom=13, maptype = "stamen_terrain")
+
+site <- ggmap(map_mtr)+
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "gray10",
+                  linewidth = 1.5)+
+  xlab("Longitude")+
+  ylab("Latitude")
+
+```
+
 
 ## Translocation
 
@@ -1089,512 +1182,6 @@ hr90_area <- st_drop_geometry(hr90_daily)
 write.csv(hr90_area, "results/daily_hr90_area.csv", row.names = TRUE)
 ```
 
-
-## Time budget HMM
-
-Time budget can be another indicator of post-release behavioural modification. We expect them to become more efficient with their foraging over time as they learn where to find and exploit resources. So we expect to see more direct travel and less time spent foraging over time. 
-
-How do they allocate their nocturnal movement? Hidden markov model.
-
-```{r}
-# read in cleaned night data
-data_night <- read.csv("data/data_clean_night.csv") %>%
-  # drop columns notneeded
-  dplyr::select(!c(sunrise, sunset, suntime, tod)) %>%
-  # format date time in posixct
-  mutate(time_local = as.POSIXct(time_local),
-         date_bird = as_date(date_bird))
-
-# prep data for moveHMM
-data_hmm <- data_night %>%
-  prepData(type = "UTM", coordNames = c("easting", "northing"),
-           covNames = c("acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "altitude")) %>%
-# add vector of the dynamic body acceleration (VEDBA)
-  mutate(vedba = ((sqrt(acceleration_raw_x^2 + acceleration_raw_y^2 + acceleration_raw_x^2))/1000))
-```
-
-### Test model
-
-Create a test subset of one bird for one month (Nutmeg in June 2023). Investigate step and angle statistics to help define starting parameters. 
-
-```{r}
-# Test subset, Nutmeg 1 month
-dates <- seq(as.Date("2023-06-01"), as.Date("2023-07-01"), "days")
-test <- filter(data_hmm, id == "Nutmeg" & date_bird %in% dates)
-
-# format as amt and calculate step lengths
-steps <- test %>%
-  # format as amt track - add columns as needed
-  make_track(.x = x, .y = y, .t = time_local, id = id, date_bird = date_bird)
-
-# check sample rate
-summarize_sampling_rate(steps)
-
-# resample track to 5 minutes
-steps <- track_resample(steps, rate = minutes(5), tolerance = minutes(1))
-
-# step statistics
-hist(test$step, xlab = "step", main = "", breaks = 30)
-summary(test$step)
-
-# angle statistics
-hist(test$angle, breaks = seq(-pi, pi, length = 15), xlab = "angle", main = "")
-summary(test$angle)
-
-```
-
-#### Number of states
-
-Compare a three state and four state model to see what performs better.
-
-```{r}
-
-# 3 state model parameters
-stepPar <- c(
-  10, 60, 200,   # Means
-  5, 20, 150,    # Standard deviations 
-  0.15, 0, 0.5   # Zero-mass values
-)
-
-anglePar <- c(
-  0, 0, 0,      # Means
-  1.5, 7, 3     # Concentrations
-)
-
-# 3 state model
-hmm3 <- momentuHMM::fitHMM(data = test, 
-               nbStates = 3,
-               dist = list(step = "gamma", angle = "vm"),
-               Par0 = list(step = stepPar, angle = anglePar),
-               estAngleMean = list(angle=TRUE),
-               formula = ~vedba
-               )
-
-hmm3
-plot(hmm3)
-
-# Step Parameters for 4 States
-stepPar <- c(
-  10, 60, 150, 300,   # Means 
-  5, 15, 100, 150,    # Standard deviations 
-  0.1, 0, 0.3, 0.15   # Zero-mass values 
-)
-
-# Angle Parameters for 4 States
-anglePar <- c(
-  0, 0, 0, 0,         # Means 
-  1.5, 5, 2, 3        # Concentrations
-)
-
-# 4 state model
-hmm4 <- momentuHMM::fitHMM(data = test, 
-               nbStates = 4,
-               dist = list(step = "gamma", angle = "vm"),
-               Par0 = list(step = stepPar, angle = anglePar),
-               estAngleMean = list(angle=TRUE),
-               formula = ~vedba
-               )
-
-hmm4
-plot(hmm4)
-
-# compare 3 and 4 state models
-AIC(hmm3, hmm4)
-```
-
-Prefer the 4 state model both visually and on AIC.
-
-Model      AIC
-1  hmm4 19401.37
-2  hmm3 19443.89
-
-#### Optimise parameters
-
-Try a range of starting values to optimise parameters.
-
-```{r}
-# For reproducibility
-set.seed(12345)
-
-# Number of tries with different starting values
-niter <- 10
-
-# Save list of fitted models
-allm <- list()
-
-# Save list of starting parameters
-parameters <- list()
-
-for(i in 1:niter) {
-  # Step length mean
-  stepMean0 <- runif(4, min = c(5, 50, 100, 200), max = c(50, 150, 300, 400))
-  
-  # Step length standard deviation
-  stepSD0 <- runif(4, min = c(5, 30, 50, 100), max = c(30, 100, 150, 200))
-  
-  # Zero mass
-  zeroMass0 <- runif(4, min = c(0.5, 0.05, 0.01, 0.2), max = c(0.9, 0.3, 0.1, 0.3))
-  
-  # Turning angle mean
-  angleMean0 <- c(0, 0, 0, 0)
-  
-  # Turning angle concentration
-  angleCon0 <- runif(4, min = c(0.5, 3, 5, 3), max = c(3, 10, 15, 10))
-  
-  # trying another angle concentration now I understand this
-  #angleCon0 <- runif(4, min = c(0.5, 0.1, 3, 5), max = c(3, 2, 10, 15))  
-  # no this was worse
-  
-  # Parameter table
-  parameters[[i]] <- data.frame(
-    state = rep(1:4),
-    stepMean0 = stepMean0,
-    stepSD0 = stepSD0,
-    zeroMass0 = zeroMass0,
-    angleMean0 = angleMean0,
-    angleCon0 = angleCon0
-  )
-  
-  # Fit model
-  stepPar0 <- c(stepMean0, stepSD0, zeroMass0)
-  anglePar0 <- c(angleMean0, angleCon0)
-  
-  allm[[i]] <- tryCatch({
-    momentuHMM::fitHMM(
-      data = test,
-      nbStates = 4,
-      dist = list(step = "gamma", angle = "vm"),
-      Par0 = list(step = stepPar0, angle = anglePar0),
-      estAngleMean = list(angle = TRUE),
-      formula = ~vedba
-    )
-  }, error = function(e) NULL)
-}
-
-# Extract likelihoods of fitted models
-allnllk <- unlist(lapply(allm, function(m) m$mod$minimum))
-
-# Index of best fitting model (smallest negative log-likelihood)
-whichbest <- which.min(allnllk)
-
-# Best fitting model
-mbest <- allm[[whichbest]]
-mbest
-plot(mbest)
-plotStates(mbest)
-
-# Best starting parameters 
-pbest_start <- parameters[[whichbest]]
-
-# Best outcome parameters
-pbest_outcome <- mbest$mle
-```
-
-Best outcome parameters:
-
-$step
-           state 1    state 2     state 3     state 4
-mean     7.2211441 28.7419041 93.49649922 253.7447067
-sd       5.6455927 23.2401216 53.89146576 312.9671872
-zeromass 0.1559012  0.1669094  0.01833069   0.2101607
-
-$angle
-                state 1    state 2    state 3   state 4
-mean          0.1170206 -0.1668971 0.02669791 0.2645331
-concentration 1.1835577  1.3724136 2.71667136 1.9204624
-
-$beta
-               1 -> 2    1 -> 3    1 -> 4    2 -> 1     2 -> 3    2 -> 4
-(Intercept) -5.204991 -8.829121 -2.213485 -6.221311 -10.254742 -4.297407
-vedba        6.313020 -3.078513 -1.617744  5.398456  -4.197239  4.724587
-               3 -> 1    3 -> 2     3 -> 4    4 -> 1    4 -> 2    4 -> 3
-(Intercept) -8.220560 -2.225103  0.4526661 -2.324431 -0.453848  1.538068
-vedba       -3.345948  1.189772 -2.1410536  1.063941  1.259101 -3.388000
-
-$delta
-               state 1   state 2      state 3      state 4
-ID:Nutmeg 0.0004158271 0.9993644 5.228222e-05 0.0001674458
-
-### Run HMM
-
-Apply best parameters for a 4 state model to all birds.
-
-```{r}
-# Step Parameters 
-stepPar <- c(
-  7, 29, 93, 253,   # Means
-  6, 23, 54, 313,    # Standard deviations 
-  0.16, 0.17, 0.02, 0.21   # Zero-mass values 
-)
-
-# Angle Parameters for 4 States
-anglePar <- c(
-  0.11, -0.17, 0.03, 0.26,         # Means 
-  1.18, 1.37, 2.72, 1.92        # Concentrations
-)
-
-# 4 state model (approx. 7 hours to run) 🐢🐢
-hmm_all <- momentuHMM::fitHMM(data = data_hmm, 
-               nbStates = 4,
-               dist = list(step = "gamma", angle = "vm"),
-               Par0 = list(step = stepPar, angle = anglePar),
-               estAngleMean = list(angle=TRUE),
-               formula = ~vedba
-               )
-
-# see states
-hmm_all
-
-# plot results
-plot(hmm_all)
-
-# check residuals
-plotPR(hmm_all)
-
-# Decode states
-data_hmm2 <- data_hmm %>%
-  mutate(states = viterbi(hmm_all))
-
-# save output
-write.csv(data_hmm2, "data/data_hmm.csv", row.names = FALSE)
-
-```
-
-$step
-$step$est
-           state 1    state 2    state 3     state 4
-mean     8.2208094 20.3895440 57.8629585 129.4745424
-sd       6.6718586 17.2595917 33.1696834 142.4877739
-zeromass 0.1835534  0.1435767  0.1017199   0.1056076
-
-$step$se
-             state 1     state 2     state 3    state 4
-mean     0.059195569 0.158752114 0.504588470 1.62585187
-sd       0.059392166 0.135826249 0.350108882 1.68770684
-zeromass 0.001644487 0.001121659 0.002745764 0.00326152
-
-$step$lower
-           state 1    state 2     state 3      state 4
-mean     8.1047882 20.0783956 56.87398323 126.28793127
-sd       6.5554521 16.9933771 32.48348260 139.17992928
-zeromass 0.1803303  0.1413783  0.09633832   0.09921516
-
-$step$upper
-           state 1    state 2    state 3     state 4
-mean     8.3368306 20.7006924 58.8519337 132.6611535
-sd       6.7882651 17.5258063 33.8558842 145.7956185
-zeromass 0.1867766  0.1457751  0.1071015   0.1120001
-
-
-$angle
-$angle$est
-                    state 1     state 2     state 3    state 4
-mean          -0.0006350116 -0.02490599 0.005901283 0.02889899
-concentration  0.9849618919  1.34078324 2.855987790 1.62310950
-
-$angle$se
-                  state 1     state 2     state 3    state 4
-mean          0.008772497 0.004360951 0.005746417 0.01000978
-concentration 0.009074356 0.008098515 0.040103562 0.01989011
-
-$angle$lower
-                  state 1    state 2      state 3     state 4
-mean          -0.01782879 -0.0334533 -0.005361488 0.009280183
-concentration  0.96717648  1.3249104  2.777386254 1.584125600
-
-$angle$upper
-                 state 1     state 2    state 3    state 4
-mean          0.01655877 -0.01635868 0.01716405 0.04851779
-concentration 1.00274730  1.35665604 2.93458933 1.66209339
-
-
-$gamma
-$gamma$est
-            state 1    state 2      state 3    state 4
-state 1 0.931458331 0.05761075 2.899808e-05 0.01090192
-state 2 0.025798292 0.89292770 4.665911e-02 0.03461490
-state 3 0.002059385 0.20857863 7.299991e-01 0.05936288
-state 4 0.036632497 0.16340398 1.137106e-01 0.68625289
-
-$gamma$se
-            state 1     state 2     state 3      state 4
-state 1 0.001852868 0.001856780         NaN 0.0009593681
-state 2 0.001035936 0.001734979 0.001537815 0.0010952092
-state 3 0.001406860 0.004757413 0.005098452 0.0034170704
-state 4 0.002882481 0.006547791 0.005798381 0.0077365855
-
-$gamma$lower
-            state 1    state 2    state 3     state 4
-state 1 0.927736437 0.05407762        NaN 0.009173398
-state 2 0.023843831 0.88947937 0.04373596 0.032531334
-state 3 0.000539143 0.19940768 0.71989062 0.053008962
-state 4 0.031383508 0.15097250 0.10283144 0.670894349
-
-$gamma$upper
-            state 1    state 2    state 3    state 4
-state 1 0.935001961 0.06135974        NaN 0.01295190
-state 2 0.027908379 0.89628098 0.04976747 0.03682684
-state 3 0.007832716 0.21805649 0.73987462 0.06642498
-state 4 0.042720676 0.17664613 0.12557970 0.70121389
-
-### Time budget
-
-```{r}
-# read in data with hmm states
-data_hmm <- read.csv("data/data_hmm.csv")
-
-# calculate proportion of fixes in each state per bird per day
-budget_daily <- data_hmm %>%
-  group_by(ID, date_bird) %>%
-  # count of states
-  count(states) %>%
-  # pivot to wide format
-  pivot_wider(names_from = 3, values_from = 4) %>%
-  # rename state columns
-  rename(state1 = 3,
-         state2 = 4,
-         state3 = 5,
-         state4 = 6) %>%
-  # replace NAs with zeros
-  replace(is.na(.), 0) %>%
-  # calculate proportion
-  mutate(total = sum(state1, state2, state3, state4),
-         state1p = state1/total,
-         state2p = state2/total,
-         state3p = state3/total,
-         state4p = state4/total) %>%
-  arrange(date_bird) %>%
-  # rename ID
-  rename(id = ID)
-
-# save to file
-write.csv(budget_daily, "results/daily_time_budget.csv", row.names = FALSE)
-
-# summarise over time
-budget <- budget_daily %>%
-  # calculate mean and sd
-  group_by(id) %>%
-  summarise(s1m = mean(state1p),
-            s2m = mean(state2p),
-            s3m = mean(state3p),
-            s4m = mean(state4p)) %>%
-  pivot_longer(2:5, names_to = "state", values_to = "budget") %>%
-  # add cohort
-  left_join(select(metadata, c(id, cohort)))
-
-# plot time budget mean by bird
-ggplot(budget)+
-  geom_bar(aes(x = id, y = budget, fill = state), position="fill", stat="identity")+
-  theme_minimal()+
-  scale_fill_viridis_d()+
-  theme(axis.title.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.ticks.x=element_blank(),
-        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1))+
-  facet_wrap(~cohort, scales="free_x")
-```
-
-I had a follow up question which is how well vedba aligns with states - where I expect vedba to go 1 < 2 < 3 < 4
-
-```{r}
-# read in data with hmm states
-data_hmm <- read.csv("data/data_hmm.csv") %>%
-  mutate(states = as_factor(states))
-
-# plot
-ggplot(data_hmm)+
-  geom_boxplot(aes(states, vedba, group = states))
-
-# aov
-temp <- aov(vedba ~ states, data = data_hmm)
-summary(temp)
-
-# post hoc tukey
-TukeyHSD(temp)
-```
-
-VEDBA differed between all states except 1-2 comparison. But step lengths longer in state 2 than state 1.
-
-### HMM example map
-
-Want to include a figure with sample state movements, for a flying and non flying bird. 
-
-```{r}
-# hmm subset, Nutmeg 1 week
-dates1 <- seq(as.Date("2023-04-22"), as.Date("2023-05-01"), "days")
-
-sample_hmm1 <- read.csv("data/data_hmm.csv") %>%
-  filter(ID == "Nutmeg" & date_bird %in% dates1) %>%
-  mutate(states = as_factor(states)) %>%
-  arrange(date)
-
-## create segments to colour path
-segments1 <- sample_hmm1 %>%
-  mutate(next_lon = lead(longitude),
-         next_lat = lead(latitude),
-         next_state = lead(states)) %>%
-  filter(!is.na(next_lon))
-
-## plot on ggmap background
-map1 <- ggmap(map_z14) +
-  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
-                  linetype = "longdash") +
-  geom_segment(data = segments1, 
-               aes(x = longitude, y = latitude,
-                   xend = next_lon, yend = next_lat,
-                   color = states)) +
-  geom_point(data = sample_hmm1, aes(longitude, latitude, colour = states)) +
-  scale_colour_viridis_d() +
-  theme_void()+
-  annotation_north_arrow(location = "tr", 
-                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
-                         style = north_arrow_orienteering(text_col = "black"))+
-  # add scale bar in just the resident facet panel
-  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
-                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
-  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
-
-# hmm subset, Fauna 1 week
-dates2 <- seq(as.Date("2023-06-07"), as.Date("2023-06-14"), "days")
-
-sample_hmm2 <- read.csv("data/data_hmm.csv") %>%
-  filter(ID == "Fauna" & date_bird %in% dates2) %>%
-  mutate(states = as_factor(states)) %>%
-  arrange(date)
-
-## create segments to colour path
-segments2 <- sample_hmm2 %>%
-  mutate(next_lon = lead(longitude),
-         next_lat = lead(latitude),
-         next_state = lead(states)) %>%
-  filter(!is.na(next_lon))
-
-## plot on ggmap background
-map2 <- ggmap(map_z15) +
-  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
-                  linetype = "longdash") +
-  geom_segment(data = segments2, 
-               aes(x = longitude, y = latitude,
-                   xend = next_lon, yend = next_lat,
-                   color = states)) +
-  geom_point(data = sample_hmm2, aes(longitude, latitude, colour = states)) +
-  scale_colour_viridis_d() +
-  theme_void()+
-  annotation_north_arrow(location = "tr", 
-                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
-                         style = north_arrow_orienteering(text_col = "black"))+
-  # add scale bar in just the resident facet panel
-  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
-                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
-  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
-
-# multi plot
-ggarrange(map1, map2,
-          ncol = 2, nrow = 1,
-          labels = c("A", "B"),
-          common.legend = TRUE, legend = "bottom")
-```
-
 # Conspecific interactions
 
 The key issue addressed in this paper is whether social interaction occurs between residents and reinforcers, and if so whether this mediates post-release outcomes for the cohorts. 
@@ -2452,134 +2039,9 @@ All groups have significantly different home range size.
 **Interpretation:**
 Stabilising home range area (significant negative quadratic term) indicates progression along establishment occurs for both groups - this is similar to roost site fidelity, showing exploration then contraction. 
 
-Exclusive reinforcers have the smallest home ranges, perhaps related to distance moved - they decline their home range size significantly more than mixed reinforcers. Mixed reinforcers may be benefiting from habitat cues, prompting them to explore more, or from perceived safety being in the larger group. 
+Exclusive reinforcers have the smallest home ranges, perhaps related to distance moved - they decline their home range size significantly more than mixed reinforcers. Mixed reinforcers may be benefiting from habitat cues, prompting them to explore more, or from perceived safety being in the larger group.
 
-### m5: Time budget
-
-Does time allocated to foraging differ between the social groups?
-
-```{r}
-# read in data and filter to reinforcement period
-datam5 <- read.csv("results/daily_time_budget.csv") %>%
-  # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
-  # format dates as dates
-  mutate(date = as_date(date_bird)) %>%
-  # limit to reinforcement period
-  filter(date %in% rein_dates) %>%
-  # add a time elapsed post-release variable
-  mutate(elapsed = as.numeric(date - as_date("2023-06-10"))) %>%
-  # add column for membership to social group
-  mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
-  # convert group to factor and set resident as the intercept
-  mutate(social = factor(social, levels = c("Resident", "Reinforcer - mixed", "Reinforcer - exclusive")))
-
-# create social group means
-sum5 <- datam5 %>%
-  group_by(date, social) %>%
-  summarise(dist = mean(state2p),
-            upper = dist + 1.96 * std.error(state2p),
-            lower = dist - 1.96 * std.error(state2p)) %>%
-  arrange(date)
-
-# overall means
-mean5 <- datam5 %>%
-  group_by(social) %>%
-  summarise(mean = mean(state2p),
-            se = std.error(state2p))
-
-# and pivot longer for barchart
-datam5bar <- datam5 %>%
-  select(!3:7) %>%
-  pivot_longer(3:6, names_to = "state", values_to = "proportion")
-
-# plot time budget by social group
-ggplot(datam5bar)+
-  geom_bar(aes(x = social, y = proportion, fill = state),
-           position="fill", stat="identity")+
-  xlab("Social group")+ 
-  ylab("Time budget allocation")+
-  theme_minimal()+
-  scale_fill_viridis_d()
-
-# plot foraging allocation over time as social group means
-ggplot(sum5, aes(date, dist, ymin = lower, ymax = upper)) +
-  geom_path(aes(colour = social)) +
-  geom_ribbon(aes(fill = social), alpha = 0.2) +
-  xlab("Days post-reinforcement") + 
-  ylab("Proportion time allocated to foraging %") +
-  theme_minimal() +
-  scale_fill_viridis_d()+
-  scale_colour_viridis_d()
-
-# distribution of allocation
-hist(datam5$state2p)
-ggqqplot(datam5$state2p)
-
-# Adjust values slightly so that 0 < x < 1
-datam5 <- datam5 %>%
-  mutate(adjusted = (state2p + 0.001) / 1.002)
-
-hist(datam5$adjusted)
-ggqqplot(datam5$adjusted)
-
-# test difference between the groups with interaction of time as a quadratic
-m5 <- glmmTMB(adjusted ~ social * (scale(elapsed) + I(scale(elapsed)^2)) + (1|id), 
-              data = datam5,
-              family = beta_family(link = "logit"),
-              na.action = "na.fail")
-
-# model selection
-dm5 <- dredge(m5)
-dm5
-
-# parsimonious model where delta <2 and fewest predictors 
-# in this case the second model had delta AICc of 1 and 2 fewer predictors
-best5 <- get.models(dm5, delta<2)[[2]]
-
-# check model
-check_model(best5)
-
-# summary
-summary(best5)
-
-# post-hoc comparison of means
-emmeans(best5, pairwise ~ social, type = "response")
-
-# post-hoc comparison of slopes
-emtrends(best5, pairwise ~ social, var = "elapsed")
-
-# plot effects
-plot_model(best5)
-
-# marginal effects 
-pred5 <- predict_response(best5, terms = c("elapsed [all]", "social"),
-                          bias_correction = TRUE)
-
-# plot predictions
-ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  geom_line(aes(colour = group))+
-  geom_ribbon(alpha = 0.2)+
-  xlab("Days post-reinforcement") + 
-  ylab("Predicted values of time allocated to foraging %") +
-  theme_minimal()+
-  scale_fill_viridis_d()+
-  scale_colour_viridis_d()
-```
-
-**Results:**
-The best fitting model included social group and time (quadratic only), the interaction between social group and the quadratic, and individual as a random effect.
-
-The reinforcer groups (both mixed and exclusive) are more likely to exhibit higher foraging allocation (mean 64% for mixed and 67% for exclusive) than the residents (mean 47%, p < 0.0001). The reinforcers did not differ from one another. 
-
-Linear time was not included in the model - instead a significant positive quadratic effect.The quadratic effect was significantly less for reinforcers than residents (p < 0.034). 
-
-**Interpretation:**
-Both reinforcers have higher allocations than the residents, probably because residents have overall better foraging efficiency. 
-
-The quadratic trend may be associated with seasonal food availability.
-
-### m6: Weight change
+### m5: Weight change
 
 In addition to the movement-based metrics of performance I wanted to look at health check data. Weight change post-release is a good indicator of performance, where some loss is expected but less steep decline (trending towards stability) indicates better performance.
 
@@ -2589,7 +2051,7 @@ Unlike the movement data, the study period is for 70 days because weights were t
 
 ```{r}
 # read in data and clean up
-datam6 <- read_xlsx("data/healthchecks.xlsx") %>%
+datam5 <- read_xlsx("data/healthchecks.xlsx") %>%
   clean_names() %>%
   rename(id = identity) %>%
   select(id, date, weight) %>%
@@ -2615,7 +2077,7 @@ datam6 <- read_xlsx("data/healthchecks.xlsx") %>%
   filter(elapsed <70)
 
 # plot weight pre and post-release
-ggplot(datam6)+
+ggplot(datam5)+
   geom_boxplot(aes(social, weight))+
   theme_minimal()+
   facet_wrap(~status)
@@ -2627,7 +2089,7 @@ Next I calculated the change in weight both in grams and as a proportion of star
 
 ```{r}
 # calculate weight change in grams and as a proportion of starting weight
-sum6 <- datam6 %>%
+sum5 <- datam5 %>%
   select(c(id, social, weight, status)) %>%
   pivot_wider(names_from = status, values_from = weight) %>%
   clean_names() %>%
@@ -2639,12 +2101,12 @@ sum6 <- datam6 %>%
   mutate(social = as_factor(social))
 
 # plot total weight differences by social group
-ggplot(sum6)+
+ggplot(sum5)+
   geom_boxplot(aes(social, diff))+
   theme_minimal()
 
 # plot proportional weight differences by social group
-ggplot(sum6)+
+ggplot(sum5)+
   geom_boxplot(aes(social, proportion))+
   theme_minimal()
 ```
@@ -2653,22 +2115,22 @@ Although total weight change seems on average lower in the mixed group, proporti
 
 ```{r}
 # check distribution of the difference
-hist(sum6$diff)
-ggqqplot(sum6$diff)
+hist(sum5$diff)
+ggqqplot(sum5$diff)
 
 # test whether weight change differs between the social groups
 # as total difference
-m6a <- glmmTMB(diff ~ social, data = sum6)
-summary(m6a)
+m5a <- glmmTMB(diff ~ social, data = sum5)
+summary(m5a)
 # and as a proportion of starting weight
-m6b <- glmmTMB(proportion ~ social, data = sum6)
-summary(m6b)
+m5b <- glmmTMB(proportion ~ social, data = sum5)
+summary(m65)
 
 # predictions
-pred6b <- predict_response(m6b, terms = c("social"))
+pred5b <- predict_response(m5b, terms = c("social"))
 
 # plot predictions
-ggplot(pred6b, aes(x, predicted, colour = x))+
+ggplot(pred5b, aes(x, predicted, colour = x))+
   geom_pointrange(aes(ymin = conf.low, ymax = conf.high))+
   xlab("Social group membership") + 
   ylab("Predicted values of proportion starting weight lost")+
@@ -2682,14 +2144,14 @@ I want to model predicted effects of overall weight change so I can model a geom
 
 ```{r}
 # weight change over time between social groups
-m6 <- glmmTMB(weight ~ social * status, data = datam6)
-summary(m6)
+m5 <- glmmTMB(weight ~ social * status, data = datam5)
+summary(m5)
 
 # predictions
-pred6 <- predict_response(m6, terms = c("status", "social"))
+pred5 <- predict_response(m5, terms = c("status", "social"))
 
 # plot predictions
-ggplot(pred6, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high, group = group)) +
+ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high, group = group)) +
   geom_line(aes(colour = group))+
   geom_ribbon(alpha = 0.2)+
   xlab(element_blank())+ 
@@ -2714,11 +2176,13 @@ theme <- function(){
     xlab(element_blank()),
     scale_x_continuous(breaks=seq(0, 50, 10)),
     theme_classic(),
-    ggplot2::theme(axis.title.y = element_text(hjust = 0.1, size = 10)),
+    ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10)),
     scale_color_manual(values = pal,
-                       name = "Cohort and social group membership"),
+                       name = "Cohort and social group membership",
+                       guide="none"),
     scale_fill_manual(values = pal,,
-                      name = "Cohort and social group membership")
+                      name = "Cohort and social group membership",
+                      guide="none")
   )
 }
 
@@ -2743,70 +2207,32 @@ g4 <- ggplot(pred4, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf
   ylab("Home range area (ha)")+
   theme()
 
-g5 <- ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  xlab("Days post-reinforcement") + 
-  ylab("Time allocated to foraging")+
-  theme()
-
-g6 <- ggplot(pred6, aes(x, predicted, fill = group, 
+g5 <- ggplot(pred5, aes(x, predicted, fill = group, 
                         ymin = conf.low, ymax = conf.high, group = group)) +
   geom_line(aes(colour = group))+
   geom_ribbon(alpha = 0.2)+
   theme_classic()+
   xlab(element_blank())+
   ylab("Weight (g)") +
-  scale_colour_manual(values = c("#2E3EDC", "#07A567"))+
-  scale_fill_manual(values = c("#2E3EDC", "#07A567"))+
-  ggplot2::theme(axis.title.y = element_text(hjust = 0.3, size = 10))
+  scale_colour_manual(values = c("#2E3EDC", "#07A567"), guide="none")+
+  scale_fill_manual(values = c("#2E3EDC", "#07A567"), guide="none")+
+  ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10))
+
+# make legend
+temp <- ggplot(pred1, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
+  geom_line(aes(colour = group)) +
+  geom_ribbon(alpha = 0.2) +
+  scale_color_manual(values = pal,
+                       name = "Cohort and social group membership")+
+  scale_fill_manual(values = pal,
+                      name = "Cohort and social group membership")+
+  ggplot2::theme(legend.title=element_text(size=10))
+legend <- get_legend(temp)
 
 # multi plot 3x2
-ggarrange(g1, g2, g3, g4, g5, g6,
-          ncol = 3, nrow = 2,
-          labels = c("A", "B", "C", "D", "E", "F"),
-          common.legend = TRUE, legend = "bottom")
-```
-
-Multi plot of all effects.
-
-```{r}
-# effects
-e1 <- plot_model(best1)[["data"]] %>%
-  mutate(variable = "Daily distance moved")
-
-e2 <- plot_model(best2)[["data"]] %>%
-  mutate(variable = "Roost displacement")
-
-e3 <- plot_model(best3)[["data"]] %>%
-  mutate(variable = "Release site fidelity")
-
-e4 <- plot_model(best4)[["data"]] %>%
-  mutate(variable = "Home range area")
-
-e5 <- plot_model(best5)[["data"]] %>%
-  mutate(variable = "Time allocated to foraging")
-
-e6 <- plot_model(m6)[["data"]] %>%
-  mutate(variable = "Weight")
-
-# combine effects
-effects <- rbind(e1, e2, e3, e4, e5, e6) %>%
-  # add column for point size by strength of evidence (p values)
-  mutate(strength  = ifelse(p.stars == "*", 2, 
-                            ifelse(p.stars == "**", 3,
-                                   ifelse(p.stars == "***", 4, 1))))
-
-# plot effects
-ggplot(effects)+
-  geom_pointrange(aes(estimate, term, 
-                      xmin = conf.low, xmax = conf.high, 
-                      size = strength, colour = group),
-                  show.legend = FALSE)+
-  geom_vline(xintercept=c(0), linetype="longdash")+
-  facet_wrap(~variable, scales = "free_x")+
-  scale_size_continuous(range = c(0.3, 1))+
-  xlab(element_blank())+
-  ylab(element_blank())+
-  theme_classic()
+combined_plot <- (g1 + g2 + g3)  / (g4 + g5 + legend) + 
+  plot_annotation(tag_levels = 'A')
+combined_plot
 ```
 
 # Statistical analysis residents
@@ -2824,13 +2250,13 @@ post_dates <- seq.Date(from = as_date("2023-06-07"), to = as_date("2023-08-05"),
 dates <- c(pre_dates, post_dates)
 ```
 
-## m7: Distance moved
+## m6: Distance moved
 
 Do residents change their distance moved after reinforcement?
 
 ```{r}
 # read in data and filter to residents for reinforcement period
-datam7 <- read.csv("results/daily_distance_moved.csv") %>%
+datam6 <- read.csv("results/daily_distance_moved.csv") %>%
   # add metadata
   left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
   # select only residents
@@ -2845,7 +2271,7 @@ datam7 <- read.csv("results/daily_distance_moved.csv") %>%
                          levels  = c("pre-reinforcement", "post-reinforcement")))
 
 # create social group means
-sum7 <- datam7 %>%
+sum6 <- datam6 %>%
   group_by(date) %>%
   summarise(dist = mean(daily_dist),
             upper = dist + 1.96 * std.error(daily_dist),
@@ -2853,7 +2279,7 @@ sum7 <- datam7 %>%
   arrange(date)
 
 # plot daily distance over time as period means
-ggplot(sum7, aes(date, dist, ymin = lower, ymax = upper)) +
+ggplot(sum6, aes(date, dist, ymin = lower, ymax = upper)) +
   geom_path() +
   geom_ribbon(alpha = 0.2) +
   xlab("Days post-reinforcement") + 
@@ -2864,11 +2290,136 @@ ggplot(sum7, aes(date, dist, ymin = lower, ymax = upper)) +
   geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
 
 # distribution of movement data
-hist(datam7$daily_dist)
-ggqqplot(datam7$daily_dist)
+hist(datam6$daily_dist)
+ggqqplot(datam6$daily_dist)
 
 # test difference pre and post reinforcement
-m7 <- glmmTMB(daily_dist ~ period * (scale(as.numeric(date))) + (1|id), 
+m6 <- glmmTMB(daily_dist ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
+              data = datam6,
+              na.action = "na.fail")
+
+# model selection
+dm6 <- dredge(m6)
+dm6
+
+# parsimonious model where delta <2 and fewest predictors 
+# in this case only one model (top ranked) had delta AICc <2
+best6 <- get.models(dm6, delta<2)[[1]]
+
+# check model
+check_model(best6)
+
+# summary
+summary(best6)
+
+# plot effects
+plot_model(best6)
+```
+
+**Plot**
+
+Unlike the reinforcer data, we are comparing the residents pre- and post-reinforcement. So the predictions need to be bounded into valid date range. 
+
+```{r}
+# Generate prediction data only within valid date ranges
+release_date <- as_date("2023-06-07")
+
+pred_data_pre <- expand.grid(
+  date = seq(min(datam6$date[datam6$period == "pre-reinforcement"]),
+             release_date - 1, by = 1),
+  period = "pre-reinforcement"
+)
+
+pred_data_post <- expand.grid(
+  date = seq(release_date, max(datam6$date[datam6$period == "post-reinforcement"]), by = 1),
+  period = "post-reinforcement"
+)
+
+# Combine and add necessary covariates (date2, id, etc.)
+pred6 <- rbind(pred_data_pre, pred_data_post) %>%
+  mutate(id = NA)
+
+# Predict values using the valid dataset
+values6 <- predict(best6, newdata = pred6, type = "response", se.fit = TRUE) %>%
+  as.data.frame() 
+
+# Add predictions to dataframe
+pred6 <- pred6 %>%
+  mutate(predicted = values6$fit,
+         lower = values6$fit - 1.96 * values6$se.fit,
+         upper = values6$fit + 1.96 * values6$se.fit) %>%
+  # convert date back to date
+  mutate(date = as_date(date))
+
+# plot predictions
+ggplot(pred6, aes(date, predicted, ymin = lower, ymax = upper)) +
+  geom_line()+
+  geom_ribbon(alpha = 0.2)+
+  xlab(element_blank()) + 
+  ylab("Predicted values of daily distance moved (m)") +
+  theme_minimal()+
+  facet_wrap(~period, scales = "free_x")
+```
+
+**Results:**
+The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+
+Residents moved significantly less distance post reinforcement and the trend was different. 
+
+On average, residents moved 829m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+
+**Interpretation:**
+The residents changed their distance moved, perhaps to accommodate the reinforcers who could not immediately move as far. They slowly increased their distance moved to pre-reinforcement levels. 
+
+## m7: Roost fidelty
+
+Do residents change their distance between roosts after reinforcement?
+
+```{r}
+# read in data and filter to residents for reinforcement period
+datam7 <- read.csv("results/daily_distance_between_roosts.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # select only residents
+  filter(cohort == "Resident") %>%
+  # format dates as numeric
+  mutate(date = as_date(date)) %>%
+  # limit to reinforcement period
+  filter(date %in% dates) %>%
+  # add column for pre or post release
+  mutate(period = factor(ifelse(date %in% pre_dates, 
+                         "pre-reinforcement", "post-reinforcement"),
+                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
+# create social group means
+sum7 <- datam7 %>%
+  group_by(date) %>%
+  summarise(dist = mean(distance_previous),
+            upper = dist + 1.96 * std.error(distance_previous),
+            lower = dist - 1.96 * std.error(distance_previous)) %>%
+  arrange(date)
+
+# plot daily distance over time as period means
+ggplot(sum7, aes(date, dist, ymin = lower, ymax = upper)) +
+  geom_path() +
+  geom_ribbon(alpha = 0.2) +
+  xlab("Days post-reinforcement") + 
+  ylab("Distance between consecutive roosts (m)") +
+  theme_minimal() +
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()+
+  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+
+# distribution of movement data
+hist(datam7$distance_previous)
+ggqqplot(datam7$distance_previous)
+
+# correct left skew
+hist(log1p(datam7$distance_previous))
+ggqqplot(log1p(datam7$distance_previous))
+
+# test difference pre and post reinforcement
+m7 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date))) + (1|id), 
               data = datam7,
               na.action = "na.fail")
 
@@ -2891,8 +2442,6 @@ plot_model(best7)
 ```
 
 **Plot**
-
-Unlike the reinforcer data, we are comparing the residents pre- and post-reinforcement. So the predictions need to be bounded into valid date range. 
 
 ```{r}
 # Generate prediction data only within valid date ranges
@@ -2917,12 +2466,13 @@ pred7 <- rbind(pred_data_pre, pred_data_post) %>%
 values7 <- predict(best7, newdata = pred7, type = "response", se.fit = TRUE) %>%
   as.data.frame() 
 
-# Add predictions to dataframe
+# Add predictions to dataframe - back transform the log values using exponential
 pred7 <- pred7 %>%
-  mutate(predicted = values7$fit,
-         lower = values7$fit - 1.96 * values7$se.fit,
-         upper = values7$fit + 1.96 * values7$se.fit) %>%
-  # convert date back to date
+  mutate(
+    predicted = expm1(values7$fit),
+    lower = expm1(values7$fit - 1.96 * values7$se.fit),
+    upper = expm1(values7$fit + 1.96 * values7$se.fit)
+  ) %>%
   mutate(date = as_date(date))
 
 # plot predictions
@@ -2930,7 +2480,7 @@ ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
   geom_line()+
   geom_ribbon(alpha = 0.2)+
   xlab(element_blank()) + 
-  ylab("Predicted values of daily distance moved (m)") +
+  ylab("Predicted values of roost fidelity (m)") +
   theme_minimal()+
   facet_wrap(~period, scales = "free_x")
 ```
@@ -2938,64 +2488,63 @@ ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
 **Results:**
 The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
 
-Residents moved significantly less distance post reinforcement and the trend was different. 
+Residents moved significantly further between roosts immediately post-release, before settling. 
 
 On average, residents moved 1028m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
 
 **Interpretation:**
-The residents changed their distance moved, perhaps to accommodate the reinforcers who could not immediately move as far. They slowly increased their distance moved to pre-reinforcement levels. 
+The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. 
 
-## m8: Roost fidelty
+## m8: Release-site fidelity
 
-Do residents change their distance between roosts after reinforcement?
+Do residents change their distance from the release site after reinforcement?
 
 ```{r}
 # read in data and filter to residents for reinforcement period
-datam8 <- read.csv("results/daily_distance_between_roosts.csv") %>%
-  # add metadata
-  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
-  # select only residents
-  filter(cohort == "Resident") %>%
-  # format dates as numeric
-  mutate(date = as_date(date)) %>%
-  # limit to reinforcement period
-  filter(date %in% dates) %>%
-  # add column for pre or post release
-  mutate(period = factor(ifelse(date %in% pre_dates, 
-                         "pre-reinforcement", "post-reinforcement"),
-                         levels  = c("pre-reinforcement", "post-reinforcement")))
-
+datam8 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
+ # add metadata
+ left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+ # select only residents
+ filter(cohort == "Resident") %>%
+ # format dates as numeric
+ mutate(date = as_date(date)) %>%
+ # limit to reinforcement period
+ filter(date %in% dates) %>%
+ # add column for pre or post release
+ mutate(period = factor(ifelse(date %in% pre_dates, 
+                        "pre-reinforcement", "post-reinforcement"),
+                        levels  = c("pre-reinforcement", "post-reinforcement")))
 # create social group means
 sum8 <- datam8 %>%
-  group_by(date) %>%
-  summarise(dist = mean(distance_previous),
-            upper = dist + 1.96 * std.error(distance_previous),
-            lower = dist - 1.96 * std.error(distance_previous)) %>%
-  arrange(date)
+ group_by(date) %>%
+ summarise(dist = mean(dist_release),
+           upper = dist + 1.96 * std.error(dist_release),
+           lower = dist - 1.96 * std.error(dist_release)) %>%
+ arrange(date)
 
 # plot daily distance over time as period means
 ggplot(sum8, aes(date, dist, ymin = lower, ymax = upper)) +
-  geom_path() +
-  geom_ribbon(alpha = 0.2) +
-  xlab("Days post-reinforcement") + 
-  ylab("Distance between consecutive roosts (m)") +
-  theme_minimal() +
-  scale_fill_viridis_d()+
-  scale_colour_viridis_d()+
-  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
+ geom_path() +
+ geom_ribbon(alpha = 0.2) +
+ xlab("Days post-reinforcement") + 
+ ylab("Distance from release site (m)") +
+ theme_minimal() +
+ scale_fill_viridis_d()+
+ scale_colour_viridis_d()+
+ geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
 
 # distribution of movement data
-hist(datam8$distance_previous)
-ggqqplot(datam8$distance_previous)
+hist(datam8$dist_release)
+ggqqplot(datam8$dist_release)
 
-# correct left skew
-hist(log1p(datam8$distance_previous))
-ggqqplot(log1p(datam8$distance_previous))
+# correct left skew - not perfect but okay
+hist(log1p(datam8$dist_release))
+ggqqplot(log1p(datam8$dist_release))
 
 # test difference pre and post reinforcement
-m8 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date))) + (1|id), 
-              data = datam8,
-              na.action = "na.fail")
+m8 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date))) + (1|id), 
+             data = datam8,
+             na.action = "na.fail")
 
 # model selection
 dm8 <- dredge(m8)
@@ -3022,60 +2571,84 @@ plot_model(best8)
 release_date <- as_date("2023-06-07")
 
 pred_data_pre <- expand.grid(
-  date = seq(min(datam8$date[datam8$period == "pre-reinforcement"]),
-             release_date - 1, by = 1),
-  period = "pre-reinforcement"
+ date = seq(min(datam8$date[datam8$period == "pre-reinforcement"]),
+            release_date - 1, by = 1),
+ period = "pre-reinforcement"
 )
 
 pred_data_post <- expand.grid(
-  date = seq(release_date, max(datam8$date[datam8$period == "post-reinforcement"]), by = 1),
-  period = "post-reinforcement"
+ date = seq(release_date, max(datam8$date[datam8$period == "post-reinforcement"]), by = 1),
+ period = "post-reinforcement"
 )
 
 # Combine and add necessary covariates (date2, id, etc.)
 pred8 <- rbind(pred_data_pre, pred_data_post) %>%
-  mutate(id = NA)
+ mutate(id = NA)
 
 # Predict values using the valid dataset
 values8 <- predict(best8, newdata = pred8, type = "response", se.fit = TRUE) %>%
-  as.data.frame() 
+ as.data.frame() 
 
 # Add predictions to dataframe - back transform the log values using exponential
 pred8 <- pred8 %>%
-  mutate(
-    predicted = expm1(values8$fit),
-    lower = expm1(values8$fit - 1.96 * values8$se.fit),
-    upper = expm1(values8$fit + 1.96 * values8$se.fit)
-  ) %>%
-  mutate(date = as_date(date))
+ mutate(
+   predicted = expm1(values8$fit),
+   lower = expm1(values8$fit - 1.96 * values8$se.fit),
+   upper = expm1(values8$fit + 1.96 * values8$se.fit)
+ ) %>%
+ mutate(date = as_date(date))
 
 # plot predictions
 ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
-  geom_line()+
-  geom_ribbon(alpha = 0.2)+
-  xlab(element_blank()) + 
-  ylab("Predicted values of roost fidelity (m)") +
-  theme_minimal()+
-  facet_wrap(~period, scales = "free_x")
+ geom_line()+
+ geom_ribbon(alpha = 0.2)+
+ xlab(element_blank()) + 
+ ylab("Predicted values of roost fidelity (m)") +
+ theme_minimal()+
+ facet_wrap(~period, scales = "free_x")
 ```
 
 **Results:**
 The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
 
-Residents moved significantly further between roosts immediately post-release, before settling. 
-
-On average, residents moved 1028m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+Residents were significantly closer to the release site post-reinforcement. The effect of time was overall a decline in distance, but post-reinforcement showed a positive trend of time that differed from pre-reinforcement.
 
 **Interpretation:**
-The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. 
+The residents were already moving back towards the release area, but this was enhanced by the addition of the reinforcers. 
 
-## m9: Release-site fidelity
+### Resident change map
 
-Do residents change their distance from the release site after reinforcement?
+I think it would be helpful to visualise their roost locations on a map.
+
+```{r}
+ggmap(map_z15)+
+  # plot roosts colour by time
+  geom_point(aes(longitude, latitude, colour = date),
+             size = 2, data = datam8, inherit.aes = FALSE)+
+  # add release location
+  geom_point(aes(144.434323, -37.902374), 
+             colour = "white", size = 5, shape = 13, inherit.aes = FALSE)+
+  # add fence
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash")+
+  # wrap by period
+  facet_wrap(~period)+
+  # theme options
+  scale_colour_viridis_c(trans = "date", name = "2023")+
+  theme_void()+
+  scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
+  theme(legend.position="bottom",
+        legend.key.width = unit(4, 'cm'),
+        strip.text = element_text(size = 15))
+```
+
+## m9: Home range size
+
+Do residents change their home range size after reinforcement?
 
 ```{r}
 # read in data and filter to residents for reinforcement period
-datam9 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
+datam9 <- read.csv("results/daily_hr90_area.csv") %>%
  # add metadata
  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
  # select only residents
@@ -3091,9 +2664,9 @@ datam9 <- read.csv("results/daily_roost_distance_from_release.csv") %>%
 # create social group means
 sum9 <- datam9 %>%
  group_by(date) %>%
- summarise(dist = mean(dist_release),
-           upper = dist + 1.96 * std.error(dist_release),
-           lower = dist - 1.96 * std.error(dist_release)) %>%
+ summarise(dist = mean(area),
+           upper = dist + 1.96 * std.error(area),
+           lower = dist - 1.96 * std.error(area)) %>%
  arrange(date)
 
 # plot daily distance over time as period means
@@ -3101,26 +2674,26 @@ ggplot(sum9, aes(date, dist, ymin = lower, ymax = upper)) +
  geom_path() +
  geom_ribbon(alpha = 0.2) +
  xlab("Days post-reinforcement") + 
- ylab("Distance from release site (m)") +
+ ylab("Home range (90% KUD) area (ha)") +
  theme_minimal() +
  scale_fill_viridis_d()+
  scale_colour_viridis_d()+
  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
 
 # distribution of movement data
-hist(datam9$dist_release)
-ggqqplot(datam9$dist_release)
+hist(datam9$area)
+ggqqplot(datam9$area)
 
-# correct left skew - not perfect but okay
-hist(log1p(datam9$dist_release))
-ggqqplot(log1p(datam9$dist_release))
+# correct left skew
+hist(log1p(datam9$area))
+ggqqplot(log1p(datam9$area))
 
 # test difference pre and post reinforcement
-m9 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date))) + (1|id), 
+m9 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date))) + (1|id), 
              data = datam9,
              na.action = "na.fail")
 
-# model selection
+# model selection# moarea()del selection
 dm9 <- dredge(m9)
 dm9
 
@@ -3177,153 +2750,6 @@ ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
  geom_line()+
  geom_ribbon(alpha = 0.2)+
  xlab(element_blank()) + 
- ylab("Predicted values of roost fidelity (m)") +
- theme_minimal()+
- facet_wrap(~period, scales = "free_x")
-```
-
-**Results:**
-The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
-
-Residents were significantly closer to the release site post-reinforcement. The effect of time was overall a decline in distance, but post-reinforcement showed a positive trend of time that differed from pre-reinforcement.
-
-**Interpretation:**
-The residents were already moving back towards the release area, but this was enhanced by the addition of the reinforcers. 
-
-### Resident change map
-
-I think it would be helpful to visualise their roost locations on a map.
-
-```{r}
-ggmap(map_z15)+
-  # plot roosts colour by time
-  geom_point(aes(longitude, latitude, colour = date),
-             size = 2, data = datam8, inherit.aes = FALSE)+
-  # add release location
-  geom_point(aes(144.434323, -37.902374), 
-             colour = "white", size = 5, shape = 13, inherit.aes = FALSE)+
-  # add fence
-  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
-                  linetype = "longdash")+
-  # wrap by period
-  facet_wrap(~period)+
-  # theme options
-  scale_colour_viridis_c(trans = "date", name = "2023")+
-  theme_void()+
-  scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
-  theme(legend.position="bottom",
-        legend.key.width = unit(4, 'cm'),
-        strip.text = element_text(size = 15))
-```
-
-## m10: Home range size
-
-Do residents change their home range size after reinforcement?
-
-```{r}
-# read in data and filter to residents for reinforcement period
-datam10 <- read.csv("results/daily_hr90_area.csv") %>%
- # add metadata
- left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
- # select only residents
- filter(cohort == "Resident") %>%
- # format dates as numeric
- mutate(date = as_date(date)) %>%
- # limit to reinforcement period
- filter(date %in% dates) %>%
- # add column for pre or post release
- mutate(period = factor(ifelse(date %in% pre_dates, 
-                        "pre-reinforcement", "post-reinforcement"),
-                        levels  = c("pre-reinforcement", "post-reinforcement")))
-# create social group means
-sum10 <- datam10 %>%
- group_by(date) %>%
- summarise(dist = mean(area),
-           upper = dist + 1.96 * std.error(area),
-           lower = dist - 1.96 * std.error(area)) %>%
- arrange(date)
-
-# plot daily distance over time as period means
-ggplot(sum10, aes(date, dist, ymin = lower, ymax = upper)) +
- geom_path() +
- geom_ribbon(alpha = 0.2) +
- xlab("Days post-reinforcement") + 
- ylab("Home range (90% KUD) area (ha)") +
- theme_minimal() +
- scale_fill_viridis_d()+
- scale_colour_viridis_d()+
- geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
-
-# distribution of movement data
-hist(datam10$area)
-ggqqplot(datam10$area)
-
-# correct left skew
-hist(log1p(datam10$area))
-ggqqplot(log1p(datam10$area))
-
-# test difference pre and post reinforcement
-m10 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date))) + (1|id), 
-             data = datam10,
-             na.action = "na.fail")
-
-# model selection# moarea()del selection
-dm10 <- dredge(m10)
-dm10
-
-# parsimonious model where delta <2 and fewest predictors 
-# in this case only one model (top ranked) had delta AICc <2
-best10 <- get.models(dm10, delta<2)[[1]]
-
-# check model
-check_model(best10)
-
-# summary
-summary(best10)
-
-# plot effects
-plot_model(best10)
-```
-
-**Plot**
-
-```{r}
-# Generate prediction data only within valid date ranges
-release_date <- as_date("2023-06-07")
-
-pred_data_pre <- expand.grid(
- date = seq(min(datam10$date[datam10$period == "pre-reinforcement"]),
-            release_date - 1, by = 1),
- period = "pre-reinforcement"
-)
-
-pred_data_post <- expand.grid(
- date = seq(release_date, max(datam10$date[datam10$period == "post-reinforcement"]), by = 1),
- period = "post-reinforcement"
-)
-
-# Combine and add necessary covariates (date2, id, etc.)
-pred10 <- rbind(pred_data_pre, pred_data_post) %>%
- mutate(id = NA)
-
-# Predict values using the valid dataset
-values10 <- predict(best10, newdata = pred10, type = "response", se.fit = TRUE) %>%
- as.data.frame() 
-
-# Add predictions to dataframe - back transform the log values using exponential
-pred10 <- pred10 %>%
- mutate(
-   predicted = expm1(values10$fit),
-   lower = expm1(values10$fit - 1.96 * values10$se.fit),
-   upper = expm1(values10$fit + 1.96 * values10$se.fit)
- ) %>%
- mutate(date = as_date(date))
-
-# plot predictions
-ggplot(pred10, aes(date, predicted, ymin = lower, ymax = upper)) +
- geom_line()+
- geom_ribbon(alpha = 0.2)+
- xlab(element_blank()) + 
  ylab("Predicted values of home range size (ha)") +
  theme_minimal()+
  facet_wrap(~period, scales = "free_x")
@@ -3336,87 +2762,6 @@ Home range was significantly smaller post-reinforcement. Pre-reinforcement incre
 
 **Interpretation:**
 Contrary to hypothesis, they did not need bigger home range to compensate for competition. They actually stabilised their home range size. The increase April to June may have been due to seasonal food availability. 
-
-## Time over the fence
-
-I suspect the flightless reinforcers acted as an anchor to the residents, most of whom had regained flight. How many days (night technically) over the fence?
-
-```{r}
-# read in night data
-data_night <- read.csv("data/data_clean_night.csv") %>%
-  # format time as posixct
-  mutate(time_local = as.POSIXct(time_local),
-         date_bird = as_date(date_bird)) %>%
-  # add cohort info
-  left_join(select(metadata, c(id, cohort))) %>%
-  # keep only residents
-  filter(cohort == "Resident") %>%
-  # pre and post release period dates
-  filter(date_bird %in% dates)
-
-# convert to spatial points
-points <- data_night %>%
-  vect(geom = c("longitude", "latitude"), crs = "EPSG:4326")
-
-# Find points outside fence
-outside <- points[!relate(points, mtr, "intersects")] %>%
-  as.data.frame(geom = "XY")
-  
-# Plot points outside fence 
-ggmap(map_z14)+
-  geom_point(data=outside, aes(x, y, colour = id), alpha = 0.7, size = 3)+
-  geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
-  scale_colour_viridis_d()+
-  theme_void()
-
-# Days with points outside
-excursion <- outside %>%
-  group_by(id, date_bird) %>%
-  summarise(count = length(id)) %>%
-  # filter days <10 points unlikely to be an excursion
-  filter(count >= 10)
-```
-
-It's really only Nutmeg and Marmalade with flight at this stage, so insufficient replication to answer this question.
-
-## Figure
-
-```{r}
-# default theme options for all plots
-theme <- function(){
-  list(
-    geom_line(),
-    geom_ribbon(alpha = 0.2),
-    xlab(element_blank()),
-    scale_x_date(date_breaks = "1 month", date_labels = "%b"),
-    theme_classic(),
-    ggplot2::theme(axis.title.y = element_text(size = 10)),
-    facet_wrap(~period, scales = "free_x")
-  )
-}
-
-# list of plots
-g7 <- ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
-  ylab("Daily distance moved (m)") +
-  theme()
-
-g8 <- ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
-  ylab("Roost displacement (m)") +
-  theme()
-
-g9 <- ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
-  ylab("Distance from release (m)") +
-  theme()
-
-g10 <- ggplot(pred10, aes(date, predicted, ymin = lower, ymax = upper)) +
-  ylab("Home range area (ha)") +
-  theme()
-
-# multi plot 2x2
-ggarrange(g7, g8, g9, g10,
-          ncol = 2, nrow = 2,
-          labels = c("A", "B", "C", "D"))
-```
 
 # Survival analysis
 

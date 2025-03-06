@@ -1,0 +1,727 @@
+---
+title: "bsc_reinforcement_excluded"
+author: "Shoshana Rapley"
+date: "2025-03-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Keeping the analyses that I did but decided not to include.
+
+# Time over the fence
+
+I suspect the flightless reinforcers acted as an anchor to the residents, most of whom had regained flight. How many days (night technically) over the fence?
+
+```{r}
+# read in night data
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # format time as posixct
+  mutate(time_local = as.POSIXct(time_local),
+         date_bird = as_date(date_bird)) %>%
+  # add cohort info
+  left_join(select(metadata, c(id, cohort))) %>%
+  # keep only residents
+  filter(cohort == "Resident") %>%
+  # pre and post release period dates
+  filter(date_bird %in% dates)
+
+# convert to spatial points
+points <- data_night %>%
+  vect(geom = c("longitude", "latitude"), crs = "EPSG:4326")
+
+# Find points outside fence
+outside <- points[!relate(points, mtr, "intersects")] %>%
+  as.data.frame(geom = "XY")
+  
+# Plot points outside fence 
+ggmap(map_z14)+
+  geom_point(data=outside, aes(x, y, colour = id), alpha = 0.7, size = 3)+
+  geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
+  scale_colour_viridis_d()+
+  theme_void()
+
+# Days with points outside
+excursion <- outside %>%
+  group_by(id, date_bird) %>%
+  summarise(count = length(id)) %>%
+  # filter days <10 points unlikely to be an excursion
+  filter(count >= 10)
+```
+
+It's really only Nutmeg and Marmalade with flight at this stage, so insufficient replication to answer this question.
+
+## Figure
+
+```{r}
+# default theme options for all plots
+theme <- function(){
+  list(
+    geom_line(),
+    geom_ribbon(alpha = 0.2),
+    xlab(element_blank()),
+    scale_x_date(date_breaks = "1 month", date_labels = "%b"),
+    theme_classic(),
+    ggplot2::theme(axis.title.y = element_text(size = 10)),
+    facet_wrap(~period, scales = "free_x")
+  )
+}
+
+# list of plots
+g7 <- ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Daily distance moved (m)") +
+  theme()
+
+g8 <- ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Roost displacement (m)") +
+  theme()
+
+g9 <- ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Distance from release (m)") +
+  theme()
+
+g10 <- ggplot(pred10, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Home range area (ha)") +
+  theme()
+
+# multi plot 2x2
+ggarrange(g7, g8, g9, g10,
+          ncol = 2, nrow = 2,
+          labels = c("A", "B", "C", "D"))
+```
+
+# HMM
+HMM which I think was garbage and didn't have the energy to fix. 
+
+## Time budget HMM
+
+Time budget can be another indicator of post-release behavioural modification. We expect them to become more efficient with their foraging over time as they learn where to find and exploit resources. So we expect to see more direct travel and less time spent foraging over time. 
+
+How do they allocate their nocturnal movement? Hidden markov model.
+
+```{r}
+# read in cleaned night data
+data_night <- read.csv("data/data_clean_night.csv") %>%
+  # drop columns notneeded
+  dplyr::select(!c(sunrise, sunset, suntime, tod)) %>%
+  # format date time in posixct
+  mutate(time_local = as.POSIXct(time_local),
+         date_bird = as_date(date_bird))
+
+# prep data for moveHMM
+data_hmm <- data_night %>%
+  prepData(type = "UTM", coordNames = c("easting", "northing"),
+           covNames = c("acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "altitude")) %>%
+# add vector of the dynamic body acceleration (VEDBA)
+  mutate(vedba = ((sqrt(acceleration_raw_x^2 + acceleration_raw_y^2 + acceleration_raw_x^2))/1000))
+```
+
+### Test model
+
+Create a test subset of one bird for one month (Nutmeg in June 2023). Investigate step and angle statistics to help define starting parameters. 
+
+```{r}
+# Test subset, Nutmeg 1 month
+dates <- seq(as.Date("2023-06-01"), as.Date("2023-07-01"), "days")
+test <- filter(data_hmm, id == "Nutmeg" & date_bird %in% dates)
+
+# format as amt and calculate step lengths
+steps <- test %>%
+  # format as amt track - add columns as needed
+  make_track(.x = x, .y = y, .t = time_local, id = id, date_bird = date_bird)
+
+# check sample rate
+summarize_sampling_rate(steps)
+
+# resample track to 5 minutes
+steps <- track_resample(steps, rate = minutes(5), tolerance = minutes(1))
+
+# step statistics
+hist(test$step, xlab = "step", main = "", breaks = 30)
+summary(test$step)
+
+# angle statistics
+hist(test$angle, breaks = seq(-pi, pi, length = 15), xlab = "angle", main = "")
+summary(test$angle)
+
+```
+
+#### Number of states
+
+Compare a three state and four state model to see what performs better.
+
+```{r}
+
+# 3 state model parameters
+stepPar <- c(
+  10, 60, 200,   # Means
+  5, 20, 150,    # Standard deviations 
+  0.15, 0, 0.5   # Zero-mass values
+)
+
+anglePar <- c(
+  0, 0, 0,      # Means
+  1.5, 7, 3     # Concentrations
+)
+
+# 3 state model
+hmm3 <- momentuHMM::fitHMM(data = test, 
+               nbStates = 3,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+hmm3
+plot(hmm3)
+
+# Step Parameters for 4 States
+stepPar <- c(
+  10, 60, 150, 300,   # Means 
+  5, 15, 100, 150,    # Standard deviations 
+  0.1, 0, 0.3, 0.15   # Zero-mass values 
+)
+
+# Angle Parameters for 4 States
+anglePar <- c(
+  0, 0, 0, 0,         # Means 
+  1.5, 5, 2, 3        # Concentrations
+)
+
+# 4 state model
+hmm4 <- momentuHMM::fitHMM(data = test, 
+               nbStates = 4,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+hmm4
+plot(hmm4)
+
+# compare 3 and 4 state models
+AIC(hmm3, hmm4)
+```
+
+Prefer the 4 state model both visually and on AIC.
+
+Model      AIC
+1  hmm4 19401.37
+2  hmm3 19443.89
+
+#### Optimise parameters
+
+Try a range of starting values to optimise parameters.
+
+```{r}
+# For reproducibility
+set.seed(12345)
+
+# Number of tries with different starting values
+niter <- 10
+
+# Save list of fitted models
+allm <- list()
+
+# Save list of starting parameters
+parameters <- list()
+
+for(i in 1:niter) {
+  # Step length mean
+  stepMean0 <- runif(4, min = c(5, 50, 100, 200), max = c(50, 150, 300, 400))
+  
+  # Step length standard deviation
+  stepSD0 <- runif(4, min = c(5, 30, 50, 100), max = c(30, 100, 150, 200))
+  
+  # Zero mass
+  zeroMass0 <- runif(4, min = c(0.5, 0.05, 0.01, 0.2), max = c(0.9, 0.3, 0.1, 0.3))
+  
+  # Turning angle mean
+  angleMean0 <- c(0, 0, 0, 0)
+  
+  # Turning angle concentration
+  angleCon0 <- runif(4, min = c(0.5, 3, 5, 3), max = c(3, 10, 15, 10))
+  
+  # trying another angle concentration now I understand this
+  #angleCon0 <- runif(4, min = c(0.5, 0.1, 3, 5), max = c(3, 2, 10, 15))  
+  # no this was worse
+  
+  # Parameter table
+  parameters[[i]] <- data.frame(
+    state = rep(1:4),
+    stepMean0 = stepMean0,
+    stepSD0 = stepSD0,
+    zeroMass0 = zeroMass0,
+    angleMean0 = angleMean0,
+    angleCon0 = angleCon0
+  )
+  
+  # Fit model
+  stepPar0 <- c(stepMean0, stepSD0, zeroMass0)
+  anglePar0 <- c(angleMean0, angleCon0)
+  
+  allm[[i]] <- tryCatch({
+    momentuHMM::fitHMM(
+      data = test,
+      nbStates = 4,
+      dist = list(step = "gamma", angle = "vm"),
+      Par0 = list(step = stepPar0, angle = anglePar0),
+      estAngleMean = list(angle = TRUE),
+      formula = ~vedba
+    )
+  }, error = function(e) NULL)
+}
+
+# Extract likelihoods of fitted models
+allnllk <- unlist(lapply(allm, function(m) m$mod$minimum))
+
+# Index of best fitting model (smallest negative log-likelihood)
+whichbest <- which.min(allnllk)
+
+# Best fitting model
+mbest <- allm[[whichbest]]
+mbest
+plot(mbest)
+plotStates(mbest)
+
+# Best starting parameters 
+pbest_start <- parameters[[whichbest]]
+
+# Best outcome parameters
+pbest_outcome <- mbest$mle
+```
+
+Best outcome parameters:
+
+$step
+           state 1    state 2     state 3     state 4
+mean     7.2211441 28.7419041 93.49649922 253.7447067
+sd       5.6455927 23.2401216 53.89146576 312.9671872
+zeromass 0.1559012  0.1669094  0.01833069   0.2101607
+
+$angle
+                state 1    state 2    state 3   state 4
+mean          0.1170206 -0.1668971 0.02669791 0.2645331
+concentration 1.1835577  1.3724136 2.71667136 1.9204624
+
+$beta
+               1 -> 2    1 -> 3    1 -> 4    2 -> 1     2 -> 3    2 -> 4
+(Intercept) -5.204991 -8.829121 -2.213485 -6.221311 -10.254742 -4.297407
+vedba        6.313020 -3.078513 -1.617744  5.398456  -4.197239  4.724587
+               3 -> 1    3 -> 2     3 -> 4    4 -> 1    4 -> 2    4 -> 3
+(Intercept) -8.220560 -2.225103  0.4526661 -2.324431 -0.453848  1.538068
+vedba       -3.345948  1.189772 -2.1410536  1.063941  1.259101 -3.388000
+
+$delta
+               state 1   state 2      state 3      state 4
+ID:Nutmeg 0.0004158271 0.9993644 5.228222e-05 0.0001674458
+
+### Run HMM
+
+Apply best parameters for a 4 state model to all birds.
+
+```{r}
+# Step Parameters 
+stepPar <- c(
+  7, 29, 93, 253,   # Means
+  6, 23, 54, 313,    # Standard deviations 
+  0.16, 0.17, 0.02, 0.21   # Zero-mass values 
+)
+
+# Angle Parameters for 4 States
+anglePar <- c(
+  0.11, -0.17, 0.03, 0.26,         # Means 
+  1.18, 1.37, 2.72, 1.92        # Concentrations
+)
+
+# 4 state model (approx. 7 hours to run) 🐢🐢
+hmm_all <- momentuHMM::fitHMM(data = data_hmm, 
+               nbStates = 4,
+               dist = list(step = "gamma", angle = "vm"),
+               Par0 = list(step = stepPar, angle = anglePar),
+               estAngleMean = list(angle=TRUE),
+               formula = ~vedba
+               )
+
+# see states
+hmm_all
+
+# plot results
+plot(hmm_all)
+
+# check residuals
+plotPR(hmm_all)
+
+# Decode states
+data_hmm2 <- data_hmm %>%
+  mutate(states = viterbi(hmm_all))
+
+# save output
+write.csv(data_hmm2, "data/data_hmm.csv", row.names = FALSE)
+
+```
+
+$step
+$step$est
+           state 1    state 2    state 3     state 4
+mean     8.2208094 20.3895440 57.8629585 129.4745424
+sd       6.6718586 17.2595917 33.1696834 142.4877739
+zeromass 0.1835534  0.1435767  0.1017199   0.1056076
+
+$step$se
+             state 1     state 2     state 3    state 4
+mean     0.059195569 0.158752114 0.504588470 1.62585187
+sd       0.059392166 0.135826249 0.350108882 1.68770684
+zeromass 0.001644487 0.001121659 0.002745764 0.00326152
+
+$step$lower
+           state 1    state 2     state 3      state 4
+mean     8.1047882 20.0783956 56.87398323 126.28793127
+sd       6.5554521 16.9933771 32.48348260 139.17992928
+zeromass 0.1803303  0.1413783  0.09633832   0.09921516
+
+$step$upper
+           state 1    state 2    state 3     state 4
+mean     8.3368306 20.7006924 58.8519337 132.6611535
+sd       6.7882651 17.5258063 33.8558842 145.7956185
+zeromass 0.1867766  0.1457751  0.1071015   0.1120001
+
+
+$angle
+$angle$est
+                    state 1     state 2     state 3    state 4
+mean          -0.0006350116 -0.02490599 0.005901283 0.02889899
+concentration  0.9849618919  1.34078324 2.855987790 1.62310950
+
+$angle$se
+                  state 1     state 2     state 3    state 4
+mean          0.008772497 0.004360951 0.005746417 0.01000978
+concentration 0.009074356 0.008098515 0.040103562 0.01989011
+
+$angle$lower
+                  state 1    state 2      state 3     state 4
+mean          -0.01782879 -0.0334533 -0.005361488 0.009280183
+concentration  0.96717648  1.3249104  2.777386254 1.584125600
+
+$angle$upper
+                 state 1     state 2    state 3    state 4
+mean          0.01655877 -0.01635868 0.01716405 0.04851779
+concentration 1.00274730  1.35665604 2.93458933 1.66209339
+
+
+$gamma
+$gamma$est
+            state 1    state 2      state 3    state 4
+state 1 0.931458331 0.05761075 2.899808e-05 0.01090192
+state 2 0.025798292 0.89292770 4.665911e-02 0.03461490
+state 3 0.002059385 0.20857863 7.299991e-01 0.05936288
+state 4 0.036632497 0.16340398 1.137106e-01 0.68625289
+
+$gamma$se
+            state 1     state 2     state 3      state 4
+state 1 0.001852868 0.001856780         NaN 0.0009593681
+state 2 0.001035936 0.001734979 0.001537815 0.0010952092
+state 3 0.001406860 0.004757413 0.005098452 0.0034170704
+state 4 0.002882481 0.006547791 0.005798381 0.0077365855
+
+$gamma$lower
+            state 1    state 2    state 3     state 4
+state 1 0.927736437 0.05407762        NaN 0.009173398
+state 2 0.023843831 0.88947937 0.04373596 0.032531334
+state 3 0.000539143 0.19940768 0.71989062 0.053008962
+state 4 0.031383508 0.15097250 0.10283144 0.670894349
+
+$gamma$upper
+            state 1    state 2    state 3    state 4
+state 1 0.935001961 0.06135974        NaN 0.01295190
+state 2 0.027908379 0.89628098 0.04976747 0.03682684
+state 3 0.007832716 0.21805649 0.73987462 0.06642498
+state 4 0.042720676 0.17664613 0.12557970 0.70121389
+
+### Time budget
+
+```{r}
+# read in data with hmm states
+data_hmm <- read.csv("data/data_hmm.csv")
+
+# calculate proportion of fixes in each state per bird per day
+budget_daily <- data_hmm %>%
+  group_by(ID, date_bird) %>%
+  # count of states
+  count(states) %>%
+  # pivot to wide format
+  pivot_wider(names_from = 3, values_from = 4) %>%
+  # rename state columns
+  rename(state1 = 3,
+         state2 = 4,
+         state3 = 5,
+         state4 = 6) %>%
+  # replace NAs with zeros
+  replace(is.na(.), 0) %>%
+  # calculate proportion
+  mutate(total = sum(state1, state2, state3, state4),
+         state1p = state1/total,
+         state2p = state2/total,
+         state3p = state3/total,
+         state4p = state4/total) %>%
+  arrange(date_bird) %>%
+  # rename ID
+  rename(id = ID)
+
+# save to file
+write.csv(budget_daily, "results/daily_time_budget.csv", row.names = FALSE)
+
+# summarise over time
+budget <- budget_daily %>%
+  # calculate mean and sd
+  group_by(id) %>%
+  summarise(s1m = mean(state1p),
+            s2m = mean(state2p),
+            s3m = mean(state3p),
+            s4m = mean(state4p)) %>%
+  pivot_longer(2:5, names_to = "state", values_to = "budget") %>%
+  # add cohort
+  left_join(select(metadata, c(id, cohort)))
+
+# plot time budget mean by bird
+ggplot(budget)+
+  geom_bar(aes(x = id, y = budget, fill = state), position="fill", stat="identity")+
+  theme_minimal()+
+  scale_fill_viridis_d()+
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0, hjust = 1))+
+  facet_wrap(~cohort, scales="free_x")
+```
+
+I had a follow up question which is how well vedba aligns with states - where I expect vedba to go 1 < 2 < 3 < 4
+
+```{r}
+# read in data with hmm states
+data_hmm <- read.csv("data/data_hmm.csv") %>%
+  mutate(states = as_factor(states))
+
+# plot
+ggplot(data_hmm)+
+  geom_boxplot(aes(states, vedba, group = states))
+
+# aov
+temp <- aov(vedba ~ states, data = data_hmm)
+summary(temp)
+
+# post hoc tukey
+TukeyHSD(temp)
+```
+
+VEDBA differed between all states except 1-2 comparison. But step lengths longer in state 2 than state 1.
+
+### HMM example map
+
+Want to include a figure with sample state movements, for a flying and non flying bird. 
+
+```{r}
+# hmm subset, Nutmeg 1 week
+dates1 <- seq(as.Date("2023-04-22"), as.Date("2023-05-01"), "days")
+
+sample_hmm1 <- read.csv("data/data_hmm.csv") %>%
+  filter(ID == "Nutmeg" & date_bird %in% dates1) %>%
+  mutate(states = as_factor(states)) %>%
+  arrange(date)
+
+## create segments to colour path
+segments1 <- sample_hmm1 %>%
+  mutate(next_lon = lead(longitude),
+         next_lat = lead(latitude),
+         next_state = lead(states)) %>%
+  filter(!is.na(next_lon))
+
+## plot on ggmap background
+map1 <- ggmap(map_z14) +
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash") +
+  geom_segment(data = segments1, 
+               aes(x = longitude, y = latitude,
+                   xend = next_lon, yend = next_lat,
+                   color = states)) +
+  geom_point(data = sample_hmm1, aes(longitude, latitude, colour = states)) +
+  scale_colour_viridis_d() +
+  theme_void()+
+  annotation_north_arrow(location = "tr", 
+                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
+  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
+
+# hmm subset, Fauna 1 week
+dates2 <- seq(as.Date("2023-06-07"), as.Date("2023-06-14"), "days")
+
+sample_hmm2 <- read.csv("data/data_hmm.csv") %>%
+  filter(ID == "Fauna" & date_bird %in% dates2) %>%
+  mutate(states = as_factor(states)) %>%
+  arrange(date)
+
+## create segments to colour path
+segments2 <- sample_hmm2 %>%
+  mutate(next_lon = lead(longitude),
+         next_lat = lead(latitude),
+         next_state = lead(states)) %>%
+  filter(!is.na(next_lon))
+
+## plot on ggmap background
+map2 <- ggmap(map_z15) +
+  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
+                  linetype = "longdash") +
+  geom_segment(data = segments2, 
+               aes(x = longitude, y = latitude,
+                   xend = next_lon, yend = next_lat,
+                   color = states)) +
+  geom_point(data = sample_hmm2, aes(longitude, latitude, colour = states)) +
+  scale_colour_viridis_d() +
+  theme_void()+
+  annotation_north_arrow(location = "tr", 
+                         height = unit(0.8, "cm"), width = unit(0.7, "cm"),
+                         style = north_arrow_orienteering(text_col = "black"))+
+  # add scale bar in just the resident facet panel
+  annotation_scale(location = "br", text_col = "black", text_cex = 0.8,
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
+  ggplot2::theme(plot.margin = margin(0, 5, 0, 5))
+
+# multi plot
+ggarrange(map1, map2,
+          ncol = 2, nrow = 1,
+          labels = c("A", "B"),
+          common.legend = TRUE, legend = "bottom")
+```
+
+### m5: Time budget
+
+Does time allocated to foraging differ between the social groups?
+
+```{r}
+# read in data and filter to reinforcement period
+datam5 <- read.csv("results/daily_time_budget.csv") %>%
+  # add metadata
+  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
+  # format dates as dates
+  mutate(date = as_date(date_bird)) %>%
+  # limit to reinforcement period
+  filter(date %in% rein_dates) %>%
+  # add a time elapsed post-release variable
+  mutate(elapsed = as.numeric(date - as_date("2023-06-10"))) %>%
+  # add column for membership to social group
+  mutate(social = ifelse(id %in% club, "Reinforcer - exclusive", ifelse(cohort == "Resident", "Resident", "Reinforcer - mixed"))) %>%
+  # convert group to factor and set resident as the intercept
+  mutate(social = factor(social, levels = c("Resident", "Reinforcer - mixed", "Reinforcer - exclusive")))
+
+# create social group means
+sum5 <- datam5 %>%
+  group_by(date, social) %>%
+  summarise(dist = mean(state2p),
+            upper = dist + 1.96 * std.error(state2p),
+            lower = dist - 1.96 * std.error(state2p)) %>%
+  arrange(date)
+
+# overall means
+mean5 <- datam5 %>%
+  group_by(social) %>%
+  summarise(mean = mean(state2p),
+            se = std.error(state2p))
+
+# and pivot longer for barchart
+datam5bar <- datam5 %>%
+  select(!3:7) %>%
+  pivot_longer(3:6, names_to = "state", values_to = "proportion")
+
+# plot time budget by social group
+ggplot(datam5bar)+
+  geom_bar(aes(x = social, y = proportion, fill = state),
+           position="fill", stat="identity")+
+  xlab("Social group")+ 
+  ylab("Time budget allocation")+
+  theme_minimal()+
+  scale_fill_viridis_d()
+
+# plot foraging allocation over time as social group means
+ggplot(sum5, aes(date, dist, ymin = lower, ymax = upper)) +
+  geom_path(aes(colour = social)) +
+  geom_ribbon(aes(fill = social), alpha = 0.2) +
+  xlab("Days post-reinforcement") + 
+  ylab("Proportion time allocated to foraging %") +
+  theme_minimal() +
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()
+
+# distribution of allocation
+hist(datam5$state2p)
+ggqqplot(datam5$state2p)
+
+# Adjust values slightly so that 0 < x < 1
+datam5 <- datam5 %>%
+  mutate(adjusted = (state2p + 0.001) / 1.002)
+
+hist(datam5$adjusted)
+ggqqplot(datam5$adjusted)
+
+# test difference between the groups with interaction of time as a quadratic
+m5 <- glmmTMB(adjusted ~ social * (scale(elapsed) + I(scale(elapsed)^2)) + (1|id), 
+              data = datam5,
+              family = beta_family(link = "logit"),
+              na.action = "na.fail")
+
+# model selection
+dm5 <- dredge(m5)
+dm5
+
+# parsimonious model where delta <2 and fewest predictors 
+# in this case the second model had delta AICc of 1 and 2 fewer predictors
+best5 <- get.models(dm5, delta<2)[[2]]
+
+# check model
+check_model(best5)
+
+# summary
+summary(best5)
+
+# post-hoc comparison of means
+emmeans(best5, pairwise ~ social, type = "response")
+
+# post-hoc comparison of slopes
+emtrends(best5, pairwise ~ social, var = "elapsed")
+
+# plot effects
+plot_model(best5)
+
+# marginal effects 
+pred5 <- predict_response(best5, terms = c("elapsed [all]", "social"),
+                          bias_correction = TRUE)
+
+# plot predictions
+ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
+  geom_line(aes(colour = group))+
+  geom_ribbon(alpha = 0.2)+
+  xlab("Days post-reinforcement") + 
+  ylab("Predicted values of time allocated to foraging %") +
+  theme_minimal()+
+  scale_fill_viridis_d()+
+  scale_colour_viridis_d()
+```
+
+**Results:**
+The best fitting model included social group and time (quadratic only), the interaction between social group and the quadratic, and individual as a random effect.
+
+The reinforcer groups (both mixed and exclusive) are more likely to exhibit higher foraging allocation (mean 64% for mixed and 67% for exclusive) than the residents (mean 47%, p < 0.0001). The reinforcers did not differ from one another. 
+
+Linear time was not included in the model - instead a significant positive quadratic effect.The quadratic effect was significantly less for reinforcers than residents (p < 0.034). 
+
+**Interpretation:**
+Both reinforcers have higher allocations than the residents, probably because residents have overall better foraging efficiency. 
+
+The quadratic trend may be associated with seasonal food availability.
+
