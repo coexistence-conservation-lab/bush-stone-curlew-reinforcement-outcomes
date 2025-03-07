@@ -146,10 +146,13 @@ ggdraw()+
   draw_plot(geelong)+
   draw_plot(ausmap, x = 0.70, y = 0.55, width = 0.3, height = 0.3)+
   draw_plot(vicmap, x = 0.716, y = 0.28, width = 0.2679, height = 0.2679)+
-  draw_label("Mt Rothwell", x = 0.345, y = 0.805, size = 12)
+  draw_label("Mt Rothwell", x = 0.345, y = 0.805, size = 12)+
+  draw_label("A", x = 0.06, y = 0.91, size = 20)+
+  draw_label("B", x = 0.96, y = 0.82, size = 16)+
+  draw_label("C", x = 0.96, y = 0.5, size = 16)
   
 # save
-ggsave("study_site.png", dpi = 800)
+ggsave("maps/study_site.png", dpi = 800, bg = 'white')
 ```
 
 Not using but keeping here, closer map of site with You Yangs context. 
@@ -1562,11 +1565,11 @@ n1 <- ggraph(comm1)+
 
 # reinforcer network
 n2 <- ggraph(comm2)+
-  # communites polygons
+  # communities polygons
   geom_mark_hull(aes(x = x, y = y, fill = community), 
                  colour = "white", alpha = 0.2, expand = unit(0.8, "cm"),
                  show.legend = FALSE)+
-  scale_fill_manual(values = c("seagreen3", "#2E3FFF"))+
+  scale_fill_manual(values = c("#2E3FFF", "seagreen3"))+
   # format edge colour, alpha and width by the weight (proximity)
   geom_edge_fan(aes(colour = weight, alpha = weight, width = weight),
                 show.legend = FALSE)+
@@ -1574,18 +1577,27 @@ n2 <- ggraph(comm2)+
   scale_edge_width(range = c(0.1, 3))+
   # node shape by cohort
   geom_node_point(aes(shape = cohort), size = 5, 
-                  show.legend = FALSE)+
+                  show.legend = TRUE)+
   scale_shape_manual(values=c(15, 16))+
   # theme
   expand_limits(x = c(2, 7), y = c(-3.8, 2.6))+
   theme_graph(foreground = "black", border = TRUE,
-              plot_margin = margin(10, 20, 20, 20))
+              plot_margin = margin(10, 20, 5, 20))+  #top, right, bottom, left
+  # legend control
+  guides(fill = "none", edge_colour = "none", edge_width = "none", edge_alpha = "none")
+
+n2
 
 # multi panel
 ggarrange(n1, n2, 
           labels = c("A", "B"),
           ncol = 1, nrow = 2,
-          heights = c(0.5, 1))
+          common.legend = TRUE, 
+          legend="bottom",
+          heights = c(0.6, 1))
+
+# save
+ggsave("plots/social_network_both.png", dpi = 700, width = 16, height = 19, units = "cm")
 ```
 
 
@@ -1925,14 +1937,21 @@ ggmap(map_z15)+
         #legend.key.width = unit(3, 'cm'),
         #strip.text = element_text(size = 13))+
   # add north in just the resident facet panel
-  annotation_north_arrow(data  = subset(datam2, social == "Resident"),
+  annotation_north_arrow(data  = subset(datam2, social == "Reinforcer - exclusive"),
                          location = "tr", 
                          height = unit(0.8, "cm"), width = unit(0.7, "cm"),
                          style = north_arrow_orienteering(text_col = "black"))+
   # add scale bar in just the resident facet panel
-  annotation_scale(data  = subset(datam2, social == "Resident"),
+  annotation_scale(data  = subset(datam2, social == "Reinforcer - exclusive"),
                    location = "br", text_col = "black",
-                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))
+                   pad_x = unit(0.1, "cm"), pad_y = unit(0.4, "cm"))+
+  # legend and label format
+  ggplot2::theme(legend.position = "bottom",
+                 legend.key.width = unit(3,"cm"),
+                 strip.text = element_text(size = 11))
+
+# save
+ggsave("maps/roost_location_social_groups.png", dpi = 800, bg = 'white')
 ```
 
 ### m4: Home range size
@@ -2124,7 +2143,7 @@ m5a <- glmmTMB(diff ~ social, data = sum5)
 summary(m5a)
 # and as a proportion of starting weight
 m5b <- glmmTMB(proportion ~ social, data = sum5)
-summary(m65)
+summary(m5b)
 
 # predictions
 pred5b <- predict_response(m5b, terms = c("social"))
@@ -2161,7 +2180,7 @@ ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high,
 
 Significant effect of status (pre and post release) No difference between groups.
 
-## Figures
+## Figure: reinforcer stats
 
 Multi-plot of predicted values for all PRBM metrics by social group over time.
 
@@ -2173,10 +2192,11 @@ theme <- function(){
   list(
     geom_line(aes(colour = group)),
     geom_ribbon(alpha = 0.2),
-    xlab(element_blank()),
+    xlab("Days post-reinforcement"),
     scale_x_continuous(breaks=seq(0, 50, 10)),
     theme_classic(),
-    ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10)),
+    ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10),
+                   axis.title.x = element_text(size = 10)),
     scale_color_manual(values = pal,
                        name = "Cohort and social group membership",
                        guide="none"),
@@ -2188,22 +2208,18 @@ theme <- function(){
 
 # list of plots
 g1 <- ggplot(pred1, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  xlab("Days post-reinforcement") + 
   ylab("Daily distance moved (m)")+
   theme()
 
 g2 <- ggplot(pred2, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  xlab("Days post-reinforcement") + 
   ylab("Roost displacement (m)")+
   theme()
 
 g3 <- ggplot(pred3, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  xlab("Days post-reinforcement") + 
   ylab("Distance from release (m)")+
   theme()
 
 g4 <- ggplot(pred4, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
-  xlab("Days post-reinforcement") + 
   ylab("Home range area (ha)")+
   theme()
 
@@ -2212,27 +2228,31 @@ g5 <- ggplot(pred5, aes(x, predicted, fill = group,
   geom_line(aes(colour = group))+
   geom_ribbon(alpha = 0.2)+
   theme_classic()+
-  xlab(element_blank())+
+  xlab("Time period")+
   ylab("Weight (g)") +
   scale_colour_manual(values = c("#2E3EDC", "#07A567"), guide="none")+
   scale_fill_manual(values = c("#2E3EDC", "#07A567"), guide="none")+
-  ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10))
+  ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10),
+                 axis.title.x = element_text(size = 10))
 
 # make legend
 temp <- ggplot(pred1, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)) +
   geom_line(aes(colour = group)) +
   geom_ribbon(alpha = 0.2) +
   scale_color_manual(values = pal,
-                       name = "Cohort and social group membership")+
+                       name = "Cohort and social group\nmembership")+
   scale_fill_manual(values = pal,
-                      name = "Cohort and social group membership")+
-  ggplot2::theme(legend.title=element_text(size=10))
+                      name = "Cohort and social group\nmembership")+
+  ggplot2::theme(legend.title=element_text(size=10.5))
 legend <- get_legend(temp)
 
 # multi plot 3x2
 combined_plot <- (g1 + g2 + g3)  / (g4 + g5 + legend) + 
   plot_annotation(tag_levels = 'A')
 combined_plot
+
+# save 
+ggsave("plots/reinforcer_outcomes.png", dpi = 400)
 ```
 
 # Statistical analysis residents
@@ -2419,7 +2439,7 @@ hist(log1p(datam7$distance_previous))
 ggqqplot(log1p(datam7$distance_previous))
 
 # test difference pre and post reinforcement
-m7 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date))) + (1|id), 
+m7 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
               data = datam7,
               na.action = "na.fail")
 
@@ -2542,7 +2562,7 @@ hist(log1p(datam8$dist_release))
 ggqqplot(log1p(datam8$dist_release))
 
 # test difference pre and post reinforcement
-m8 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date))) + (1|id), 
+m8 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
              data = datam8,
              na.action = "na.fail")
 
@@ -2637,7 +2657,7 @@ ggmap(map_z15)+
   scale_colour_viridis_c(trans = "date", name = "2023")+
   theme_void()+
   scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
-  theme(legend.position="bottom",
+  ggplot2::theme(legend.position="bottom",
         legend.key.width = unit(4, 'cm'),
         strip.text = element_text(size = 15))
 ```
@@ -2689,7 +2709,7 @@ hist(log1p(datam9$area))
 ggqqplot(log1p(datam9$area))
 
 # test difference pre and post reinforcement
-m9 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date))) + (1|id), 
+m9 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
              data = datam9,
              na.action = "na.fail")
 
@@ -2762,6 +2782,57 @@ Home range was significantly smaller post-reinforcement. Pre-reinforcement incre
 
 **Interpretation:**
 Contrary to hypothesis, they did not need bigger home range to compensate for competition. They actually stabilised their home range size. The increase April to June may have been due to seasonal food availability. 
+
+## Figure: resident stats
+
+Multi-plot of predicted values for PRBM metrics for residents before and after reinforcement.
+
+```{r}
+# set default theme options for all plots
+labels <- c(`pre-reinforcement` = "Pre reinforcement",
+            `post-reinforcement` = "Post reinforcement")
+
+theme <- function(){
+  list(
+  geom_line(),
+  geom_ribbon(alpha = 0.2),
+  xlab(element_blank()),
+  theme_bw(),
+  facet_wrap(~period, scales = "free_x",
+             labeller = as_labeller(labels)),
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b"),
+  ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10),
+                   axis.title.x = element_text(size = 10))
+  )
+}
+
+# list of plots
+g6 <- ggplot(pred6, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Daily distance moved (m)")+
+  theme()
+
+g7 <- ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Roost displacement (m)")+
+  theme()
+
+g8 <- ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
+  ylab("Distance from release (m)")+
+  theme()
+
+g9 <- ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
+   ylab("Home range area (ha)")+
+  theme()
+
+# multi plot 3x2
+combined_plot <- (g6 + g7)  / (g8 + g9) + 
+  plot_annotation(tag_levels = 'A')
+combined_plot
+
+# save 
+ggsave("plots/resident_outcomes.png", dpi = 400, bg = 'white', 
+       width = 20, height = 16, units = "cm")
+```
+
 
 # Survival analysis
 
