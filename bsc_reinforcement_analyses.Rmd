@@ -11,7 +11,7 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 
 # Packages
-pacman::p_load(adehabitatHR, amt, atlastools, beepr, cowplot, effects, emmeans, ggeffects, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, ozmaps, patchwork, performance, plotrix, readxl, scales, scattermore, sf, showtext, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, tmap, viridis, wildlifeDI)
+pacman::p_load(adehabitatHR, amt, atlastools, beepr, cowplot, effects, emmeans, flextable, ggeffects, ggfortify, ggmap, ggnewscale, ggforce, ggpubr, ggraph, ggridges, ggspatial, glmmTMB, gtools, igraph, janitor, jtools, lme4, lmerTest, move2, momentuHMM, MuMIn, ozmaps, patchwork, performance, plotrix, readxl, scales, scattermore, sf, showtext, sjPlot, sp, suncalc, survival, survminer, terra, tidygraph, tidyterra, tidyverse, tmap, viridis, wildlifeDI)
 
 # Google and STadia API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
@@ -2255,6 +2255,24 @@ combined_plot
 ggsave("plots/reinforcer_outcomes.png", dpi = 400)
 ```
 
+## Table: reinforcer models
+
+Create model select and model effects tables for publication supp materials.
+
+```{r}
+# best models
+tab_model(best1, best2, best3, best4, m5, show.est = TRUE, show.se = TRUE, show.ci = FALSE,
+          file = "results/m1-5_effects.xls")
+
+# model selection table
+ms <- mutate(as.data.frame(dm1), model = "distance daily") %>%
+  rbind(mutate(as.data.frame(dm2), model = "roost displacement")) %>%
+  rbind(mutate(as.data.frame(dm3), model = "release fidelity")) %>% 
+  rbind(mutate(as.data.frame(dm4), model = "home range"))
+
+write.csv(ms, "results/m1-4_modelselection.csv", row.names = FALSE)
+```
+
 # Statistical analysis residents
 
 We want to know if the residents change their behaviour in response to the reinforcing release. To test this we compare their movement metrics before and after the reinforcement for the same period i.e. 60 days either side. Unlike the reinforcer dates, we are measuring post-release from the *first* reinforcer released, rather than the last - because these 3 days still have potential to impact the residents. 
@@ -2382,11 +2400,11 @@ ggplot(pred6, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor.
 
 Residents moved significantly less distance post reinforcement and the trend was different. 
 
-On average, residents moved 829m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+On average, residents moved 829m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001). 
 
 **Interpretation:**
 The residents changed their distance moved, perhaps to accommodate the reinforcers who could not immediately move as far. They slowly increased their distance moved to pre-reinforcement levels. 
@@ -2506,11 +2524,11 @@ ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+The best fitting model included period (pre or post reinforcement), date (linear and quadratic terms), the interaction between these, and individual as a random factor.
 
 Residents moved significantly further between roosts immediately post-release, before settling. 
 
-On average, residents moved 1028m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001), where distance moved was stable prior to reinforcement, whereas post-reinforcement it dropped and then slowly rose to pre-reinforcement levels. 
+Initially after reinforcement, residents substantially increased their roost displacement (by about 132% from baseline. 116m + 50m), but this effect diminished over time according to the negative interaction term.
 
 **Interpretation:**
 The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. 
@@ -2623,18 +2641,22 @@ ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
  geom_line()+
  geom_ribbon(alpha = 0.2)+
  xlab(element_blank()) + 
- ylab("Predicted values of roost fidelity (m)") +
+ ylab("Predicted values of release fidelity (m)") +
  theme_minimal()+
  facet_wrap(~period, scales = "free_x")
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor. 
 
-Residents were significantly closer to the release site post-reinforcement. The effect of time was overall a decline in distance, but post-reinforcement showed a positive trend of time that differed from pre-reinforcement.
+The main effect of period is not significant (p=0.679), meaning there wasn't an immediate change in residents' distance from the release site right after reinforcement.
+
+The pre-reinforcement period shows strong negative linear (-1.26) and quadratic (-0.60) trends, indicating residents were already moving closer to the release site over time before reinforcement.
+
+The significant interactions between period and time (both linear and quadratic) indicate the temporal pattern changed after reinforcement. Adding the interaction coefficients (0.38 for linear, 1.09 for quadratic) suggests a flattening or even reversal of the trend toward the release site.
 
 **Interpretation:**
-The residents were already moving back towards the release area, but this was enhanced by the addition of the reinforcers. 
+The residents were already moving back towards the release area, but slowed and stabilised with the addition of the reinforcers.
 
 ### Resident change map
 
@@ -2718,7 +2740,7 @@ dm9 <- dredge(m9)
 dm9
 
 # parsimonious model where delta <2 and fewest predictors 
-# in this case only one model (top ranked) had delta AICc <2
+# in this case two models had delta AICc <2 but the top ranked had fewer terms
 best9 <- get.models(dm9, delta<2)[[1]]
 
 # check model
@@ -2776,12 +2798,13 @@ ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear), the interaction between these, and individual as a random factor. We didn't use quadratic terms due to very inflated collinearity with period. 
+The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these (but not a quadratic and period interaction), and individual as a random factor.
 
-Home range was significantly smaller post-reinforcement. Pre-reinforcement increased with time whereas post-reinforcement was stable (slight decrease). 
+Immediately after reinforcement, residents reduced their home range sizes by about 35%.
+However, the strong positive interaction term indicates this pattern reversed over time, with home ranges expanding again during the post-reinforcement period.
 
 **Interpretation:**
-Contrary to hypothesis, they did not need bigger home range to compensate for competition. They actually stabilised their home range size. The increase April to June may have been due to seasonal food availability. 
+Residents had already been increasing (perhaps a seasonal effect of less food going into winter) but temporarily declined post-reinforcement before increasing again. Not strong evidence for competition alone, and the contraction again in August suggests seasonal effects.
 
 ## Figure: resident stats
 
@@ -2802,7 +2825,9 @@ theme <- function(){
              labeller = as_labeller(labels)),
   scale_x_date(date_breaks = "1 month", date_labels =  "%b"),
   ggplot2::theme(axis.title.y = element_text(hjust = 0.5, size = 10),
-                   axis.title.x = element_text(size = 10))
+                 axis.title.x = element_text(size = 10),
+                 panel.grid.major = element_blank(), 
+                 panel.grid.minor = element_blank())
   )
 }
 
@@ -2833,6 +2858,23 @@ ggsave("plots/resident_outcomes.png", dpi = 400, bg = 'white',
        width = 20, height = 16, units = "cm")
 ```
 
+## Table: resident models
+
+Create model select and model effects tables for publication supp materials.
+
+```{r}
+# best models
+tab_model(best6, best7, best8, best9, show.est = TRUE, show.se = TRUE, show.ci = FALSE,
+          file = "results/m6-9_effects.xls")
+
+# model selection table
+ms2 <- mutate(as.data.frame(dm6), model = "distance daily") %>%
+  rbind(mutate(as.data.frame(dm7), model = "roost displacement")) %>%
+  rbind(mutate(as.data.frame(dm8), model = "release fidelity")) %>% 
+  rbind(mutate(as.data.frame(dm9), model = "home range"))
+
+write.csv(ms2, "results/m6-9_modelselection.csv", row.names = FALSE)
+```
 
 # Survival analysis
 

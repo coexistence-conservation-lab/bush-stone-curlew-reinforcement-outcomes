@@ -1,0 +1,53 @@
+Response,Predictors,AICc,delta
+Distance moved daily,(Time [linear] + time [quadratic]) * period,16300.20858,0
+,(Time [linear] * period) + time [quadratic],16309.58423,9.375652365
+,(Time [quadratic] * period) + time [linear],16311.38898,11.18039671
+,Time [quadratic] * period,16321.98073,21.77214869
+,Time [linear] * period,16322.6781,22.46952025
+,Time [linear] + time [quadratic] + period,16332.47675,32.26817203
+,Time [linear] + period,16344.17593,43.9673514
+,Time [quadratic] + period,16347.02861,46.82002444
+,Period,16358.73927,58.53068873
+,Time [linear] + time [quadratic],16385.19515,84.98657216
+,Time [linear],16391.24323,91.03464883
+,Time [quadratic],16399.94611,99.73752433
+,(Intercept),16402.33322,102.1246347
+Distance between consecutive roosts,(Time [linear] * period) + time [quadratic],3077.264861,0
+,(Time [linear] + time [quadratic]) * period,3079.297317,2.032455886
+,Time [linear] * period,3089.033566,11.76870518
+,Time [quadratic] + period,3098.064691,20.79982994
+,(Time [quadratic] * period) + time [linear],3098.55683,21.29196861
+,Time [quadratic] * period,3099.184138,21.91927715
+,Time [linear] + time [quadratic] + period,3099.853689,22.58882791
+,Time [linear] + time [quadratic],3103.844861,26.57999975
+,Time [quadratic],3111.640245,34.37538391
+,Period,3114.487695,37.22283403
+,Time [linear] + period,3116.354643,39.08978199
+,Time [linear],3117.89175,40.62688894
+,(Intercept),3121.798614,44.53375338
+Distance from release site,(Time [linear] + time [quadratic]) * period,393.3910539,0
+,(Time [quadratic] * period) + time [linear],397.3785411,3.987487164
+,(Time [linear] * period) + time [quadratic],549.6110336,156.2199796
+,Time [linear] * period,559.4783858,166.0873319
+,Time [linear] + time [quadratic] + period,589.1849842,195.7939302
+,Time [quadratic] * period,636.8840108,243.4929568
+,Time [quadratic] + period,653.6057032,260.2146493
+,Time [linear] + period,700.5241799,307.133126
+,Time [linear] + time [quadratic],721.4218185,328.0307645
+,Period,756.0141921,362.6231382
+,Time [linear],799.1813931,405.7903392
+,Time [quadratic],1434.138418,1040.747365
+,(Intercept),1436.77563,1043.384576
+Home range size,(Time [linear] * period) + time [quadratic],2041.007378,0
+,(Time [linear] + time [quadratic]) * period,2042.991045,1.983666474
+,Time [quadratic] * period,2058.350528,17.34314931
+,Time [linear] + time [quadratic] + period,2059.888254,18.88087534
+,(Time [quadratic] * period) + time [linear],2060.339477,19.33209829
+,Time [linear] + time [quadratic],2064.986116,23.97873776
+,Time [linear] * period,2076.531791,35.52441218
+,Time [quadratic] + period,2085.634874,44.62749543
+,Time [quadratic],2094.782388,53.77500911
+,Time [linear] + period,2102.895352,61.88797392
+,Time [linear],2112.014775,71.00739607
+,Period,2126.996895,85.98951628
+,(Intercept),2128.738659,87.73128076
