@@ -27,11 +27,7 @@ map_z16 <- get_map(c(144.4380, -37.9000), zoom=16, maptype = "satellite")
 # Metadata - translocation information
 metadata  <- read.csv("data/metadata.csv") %>%
   clean_names() %>%
-  rename(id = identity,
-         mortality = mortality_or_capture) %>%
-  mutate(start_date = as_date(dmy(start_date)),
-         end_date = as_date(dmy(end_date)),
-         mortality = as_date(dmy(mortality)))
+  rename(id = identity)
 
 # Define fence polygons (zones 1 and 2)
 mtr <- rbind(
@@ -2882,19 +2878,14 @@ write.csv(ms2, "results/m6-9_modelselection.csv", row.names = FALSE)
 
 Do reinforcers survive better than the residents? 
 
-This is hard to answer because not tracked as long and some birds were subsequently moved to Orana (right censored data). Attempt to answer this using Kaplan Meier Analysis
+This is hard to answer because not tracked as long and some birds were subsequently moved to Orana (right censored data).
 
-Start by looking at the overall survival probabilities for all birds.
+Attempt to answer this using Kaplan Meier Analysis. Start by looking at the overall survival probabilities for all birds.
 
 ```{r m6}
 # Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
-surv_data <- metadata %>%
-  # remove columns not needed
-  dplyr::select(!c(location, abbbs, band, alive, release_year)) %>%
-  # add survival time (persistence) - right censored data
-  mutate(time = end_date - start_date) %>%
-  # add status - whether death occurs
-  mutate(status = ifelse(is.na(mortality), 0, 1))
+surv_data <- read_xlsx("data/survival.xlsx", sheet = 1) %>%
+  clean_names
 
 km <- with(surv_data, Surv(time, status))
   
@@ -2910,7 +2901,7 @@ autoplot(kmfit)
 
 The probability of survival to 1 year is 50% (CI: 34-75%). The probability of survival to 55 days (the study period) is 91% (CI: 83-100%).
 
-Next we compare survial by cohorts.
+Next we compare survival by cohorts.
 
 ```{r}
 # Fit a survival model by cohort
@@ -2926,7 +2917,7 @@ cox <- coxph(Surv(time, status) ~ cohort, data = surv_data)
 summary(cox)
 ```
 
-The probability of survival to 55 days for residents is 87% (CI: 71-100%) and for reinforcers is 95% (CI: 86-100%). So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.754). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
+The probability of survival to 55 days for residents is 87% (CI: 71-100%) and for reinforcers is 95% (CI: 86-100%). So reinforcers are slightly more likely to survive, however this effect is not significant (p=0.549). There were two disease events (one in each cohort) that accounted for most of the early deaths. Potentially the stress of translocation caused these individuals to succumb to illness. 
 
 ## Reinforcers by social group
 
@@ -2944,28 +2935,22 @@ Compare to 55 days (minimum common denominator deployment period for reinforcers
 club <- c("Rowan", "Rory", "Fauna", "Zeus", "Rocky", "Sofi", "Loki", "Avery", "Maeve")
 
 # Format data for Kaplan Meier Analysis - where death is TRUE i.e. 1
-surv_data <- metadata %>%
-  # remove columns not needed
-  dplyr::select(!c(location, abbbs, band, alive, release_year)) %>%
-  # add survival time (persistence) - right censored data
-  mutate(time = end_date - start_date) %>%
-  # add status - whether death occurs
-  mutate(status = ifelse(is.na(mortality), 0, 1)) %>%
+surv_data2 <- surv_data %>%
   # add column for membership to social group
-  mutate(social = ifelse(id %in% club, "exclusive", "mixed")) %>%
+  mutate(social = ifelse(identity %in% club, "exclusive", "mixed")) %>%
   # select only reinforcers
   filter(cohort == "Reinforcing")
 
 # Fit a survival model by social group
-kmfit_social <- survfit(Surv(time, status) ~ social, data = surv_data)
+kmfit_social <- survfit(Surv(time, status) ~ social, data = surv_data2)
 
-summary(kmfit_social, times = c(1,30,54))
+summary(kmfit_social, times = c(1,30,55))
 
 # plot
 autoplot(kmfit_social)
 
 # Fit Cox Model
-cox <- coxph(Surv(time, status) ~ social, data = surv_data)
+cox <- coxph(Surv(time, status) ~ social, data = surv_data2)
 summary(cox)
 ```
 
