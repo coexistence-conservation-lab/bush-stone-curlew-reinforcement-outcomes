@@ -1,11 +1,1 @@
-•	Reinforcement is a form of conservation translocation used to stabilise or enhance populations
-
-•	Typically considered in the context of extant populations i.e. reinforcement as a category of conservation translocation– but reinforcement is also a phase within reintroduction
-
-•	Benefits of reinforcing release assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole
-
-•	Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested
-
-•	Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (previously released and reinforcing) are accounted for and tracked with GPS
-
-•	We ask: do the cohorts integrate? And do social interactions benefit the reinforcing cohort? 
+Conservation translocations are increasingly used to restore lost or declining populations; however, they have suffered from low rates of success. Translocation tactics that leverage species’ biology, such as social organisation, can be used to influence post-release performance. Animals released as part of reintroduction programmes are theorised to benefit from conspecifics from earlier releases, due to habitat cues and opportunities for social learning. While the benefits of between-cohort interactions are broadly assumed, empirical evidence is lacking. Using high-resolution GPS tracking across a population of bush stone-curlews, _Burhinus grallarius_, we investigated whether newly released animals (‘reinforcers’) interacted with previously released conspecifics (‘residents’), and whether these interactions impacted establishment. We found post-release outcomes for reinforcers varied depending on whether they shared social group membership with residents. Half the reinforcers formed social group co-membership with the residents and the other half did not. Reinforcers in the residents’ social group had greater release site fidelity, faster roosting area establishment, and better weight maintenance than did those that were not associated with residents. We found a reciprocal anchoring effect where the residents were also attracted to the reinforcers, which enhanced resident roost site fidelity. This has implications for the development of tactics that leverage social relationships to support translocation success.  
