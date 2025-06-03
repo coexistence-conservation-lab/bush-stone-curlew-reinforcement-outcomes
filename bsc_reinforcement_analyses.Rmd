@@ -906,8 +906,8 @@ for (i in 1:length(birds)){
     }
     
     # Calculate KUD once
-    kud <- kernelUD(points[,1], h="href", grid=250, extent = 6)
-    
+    kud <- kernelUD(points[,1], h="href", grid = 300, extent = 5)
+
     # Get both 50% and 90% contours from the same KUD object
     kud90 <- getverticeshr(kud, percent = 90)
     kud50 <- getverticeshr(kud, percent = 50)
@@ -936,7 +936,17 @@ for (i in 1:length(birds)){
   }
 }
 
-# plot
+# plot home range map
+ggmap(map_z15)+
+  geom_sf(data = hr90_daily, aes(colour = id), inherit.aes = FALSE)+
+  scale_colour_viridis_c()+
+  theme_void()
+
+# plot core range map
+ggmap(map_z15)+
+  geom_sf(data = dist, aes(colour = dist_release), inherit.aes = FALSE)+
+  scale_colour_viridis_c()+
+  theme_void()
 
 
 # clip to fenced area (larger home ranges currently go beyond the fence linking points)
@@ -956,7 +966,6 @@ hr50_daily_clip <- hr50_daily %>%
 
 # save clipped shapefiles
 st_write(hr90_daily_clip, "shapefiles/hr_90_fence_clip.shp", append = FALSE)
-
 st_write(hr50_daily_clip, "shapefiles/hr_50_fence_clip.shp", append = FALSE)
 
 # extract area per day i.e. drop geometry
