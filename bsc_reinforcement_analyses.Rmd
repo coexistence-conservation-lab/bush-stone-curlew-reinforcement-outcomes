@@ -15,7 +15,6 @@ pacman::p_load(adehabitatHR, amt, atlastools, beepr, cowplot, effects, emmeans, 
 
 # Google and STadia API key for ggmaps
 ggmap::register_google(key = readChar("apikey_google.txt", nchars = file.info("apikey_google.txt")$size))
-
 ggmap::register_stadiamaps(key = readChar("apikey_stadia.txt", nchars = file.info("apikey_stadia.txt")$size))
 
 # Background maps MR zones 1 and 2
@@ -62,9 +61,7 @@ mtr <- rbind(
   c(-37.897319, 144.429048)  # S end of NW diagonal
   ) %>%  vect(type = "polygons", crs = "EPSG:4326") %>% 
   # transpose
-  t() %>%
-  # add a buffer for GPS accuracy of 30m for analysis, set to 0m for mapping
-  buffer(30)
+  t()
 ```
 
 # Introduction
@@ -166,7 +163,6 @@ site <- ggmap(map_mtr)+
 
 ```
 
-
 ## Translocation
 
 We translocated 35 adult captive-bred bush stone-curlews from Mt Rothwell captive colony to Mt Rothwell Zone 1 (fenced sanctuary) in two stages. The first (pilot) cohort of 16 birds was released between October 2022 and June 2023. The second (reinforcing) cohort of 20 birds was released in June 2023. One bird in the first cohort was taken back into captivity after a single day and re-released in the second cohort; hence total 35 individuals.
@@ -186,355 +182,89 @@ High throughput animal tracking data require filtering to remove erroneous point
 3) filtering biologically unrealistic movement
 4) median smoothing
 
-## Test pipeline
+## 1) Spatiotemporal filtering
 
-We first tested the pipeline with a subset of the data (birds "Marmalade" & "Fauna"). Marmalade left the fenced area during the study while Fauna did not. 
+First step of temporal filtering was done on movebank, where the start and end of deployments were specified for each individual. The start time was the time of release and the end time was when the GPS unit was removed or the last known point in the case of the deceased and missing birds.
 
-### 1) Temporal filtering
+We removed points after the end of the study period (5/8/23, at the start of next experiment - translocation to Orana).
 
-We removed points after the end of the study period (5/8/23 at the start of next experiment - translocation to Orana).
-
-```{r}
-# import data from movebank
-data_raw <- readr::read_csv("movebank/Fauna01.csv", show_col_types = FALSE) %>%
-  rbind(readr::read_csv("movebank/Marmalade01.csv", show_col_types = FALSE)) %>%
-  clean_names() %>%
-  # Time in posix format
-  mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
-         date = as.Date(datetime)) %>%
-  # Remove days after end of tracking period
-  filter(date < "2023-08-04") %>%
-  rename(id = individual_local_identifier)
-
-# plot raw data
-ggmap(map_z13)+
-  geom_path(data=data_raw, aes(location_long, location_lat), 
-            colour = "yellow", alpha = .6)+
-  geom_point(data=data_raw, aes(location_long, location_lat), 
-             colour = "yellow", alpha = .6)+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-### 2) Filtering by quality covariates
-
-We filter using the following covariates: 
-
-* satellite count
-* horizontal dilution of precision (HDOP)
-* altitude
-
-In the past I've found filtering by satellite count and hdop can remove errors, but when applied with the wrong parameters they can have a high rate of false positives (removing real movement) and low rate of true positives (removing unrealistic movement) so we don't want to be overly aggressive with the application of these filters.
+Spatial filtering can be done to the area of interest. Only two of the birds (Marmalade and Nutmeg) left the sanctuary (other than during mortality events) so for all others we filter to the fence with a buffer of 30m. 
 
 ```{r}
-# Histogram of satellite vales
-hist(data_raw$gps_satellite_count)
-
-# Plot track, colour by satellite values
-ggmap(map_z13)+
-  geom_path(data=data_raw, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=data_raw, aes(location_long, location_lat, colour = gps_satellite_count))+
-  scale_colour_viridis_c()+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-Most points have a satellite count >=4. Not many of the obvious spikes have low satellite count. We'll filter to include only satellite count >=4. 
-
-Now look at the horizontal dilution of precision (HDOP).
-
-```{r}
-# Histogram of hdop vales
-hist(data_raw$gps_hdop)
-
-# Plot track, colour by hdop values
-ggmap(map_z13)+
-  geom_path(data=data_raw, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=data_raw, aes(location_long, location_lat, colour = gps_hdop))+
-  scale_colour_viridis_c()+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-There are a handful of massive hdop values (5-15) but the vast majority are =<2. Again the obvious spikes don't have high hdop values. We'll filter to only include hdop <=2. 
-
-Next we'll apply filtering on the basis of altitude. 
-
-Incorrect GPS fixes often have incorrect altitude. High altitude was not expected as no birds were undertaking long-distance flight, which is the only time high altitude is possible. All birds were wing-clipped on release and some later moulted and undertook short-distance flight, but not at high altitude. 
-
-First we need to find flight height altitude by correcting for ground elevation. We are using the [FABDEM (Forest And Buildings removed Copernicus 30m DEM)](https://gee-community-catalog.org/projects/fabdem/).
-
-```{r}
-# read in FABDEM
-fabdem <- rast("data/S38E144_FABDEM_V1-0.tif") 
-
-# convert data to spatial points
-coords <- data_raw %>%
-  vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
-
-# Extract dem and add to dataframe
-data_alt <- data_raw %>%
-  mutate(terra::extract(fabdem, coords, ID = FALSE)) %>%
-  rename(elevation = "S38E144_FABDEM_V1-0") %>%
-  # calculate flight height
-  mutate(altitude = height_above_msl - elevation)
-
-# Histogram altitude
-hist(data_alt$altitude)
-
-# Summary statistics altitude
-summary(data_alt$altitude)
-quantile(data_alt$altitude, probs = 0.95)
-
-# Plot track, colour by altitude values
-ggmap(map_z13)+
-  geom_path(data=data_alt, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=data_alt, aes(location_long, location_lat, colour = altitude))+
-  scale_colour_viridis_c()+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-The median altitude (above the ground surface) was 9m. The min (-2060m) and max (8313m) altitude were considered unrealistic. Many of the obvious spikes have very high or negative altitude. 
-
-We cut off the maximum altitude at 60 (just above the 0.95 quartile) and the minimum to -10m (ground level allowing for some error).
-
-```{r}
-# Apply quality covariate filters
-data_qfilt <- data_alt %>%
-  filter(gps_satellite_count >= 4) %>%
-  filter(gps_hdop <=2) %>%
-  filter(altitude < 60 & altitude >-10)
-
-# Plot effect of filtering
-ggmap(map_z13)+
-  geom_path(data=data_raw, aes(location_long, location_lat), 
-            colour = "purple", alpha = .6)+
-  geom_point(data=data_raw, aes(location_long, location_lat), 
-             colour = "yellow")+
-  geom_point(data=data_qfilt, aes(location_long, location_lat), 
-             colour = "purple")+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-This successfully filtered out most of the obvious spikes.
-
-### 3) Filtering biologically unrealistic movement
-
-To remove spikes in the data we can filter out positions with extreme incoming and outgoing speeds. First we need to define biologically realistic incoming and outgoing speeds.
-
-```{r}
-# Append turning angle, incoming/outgoing speeds to data frame per bird
-birds <- unique(data_raw$id)
-
-data_speed <- data.frame()
-
-for(i in 1:length(birds)){
- subset <- filter(data_qfilt, id == birds[i])
-
- temp <- subset %>%
-   mutate(speed_in  = atl_get_speed( 
-           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("in")),
-    speed_out = atl_get_speed(
-           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("out")),
-    angle = atl_turning_angle(
-           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime"),
-    speed_delta = abs(speed_in - speed_out)
-    )
- 
- data_speed <- rbind(data_speed, temp)
-}
-
-# Histogram incoming speeds
-hist(data_speed$speed_in)
-
-# Summary statistics incoming speeds
-summary(data_speed$speed_in)
-quantile(data_speed$speed_in, probs = 0.99, na.rm = TRUE)
-
-# Histogram outgoing speeds
-hist(data_speed$speed_out)
-
-# Summary statistics outgoing speeds
-summary(data_speed$speed_out)
-quantile(data_speed$speed_out, probs = 0.95, na.rm = TRUE)
-
-# Histogram turning angle
-hist(data_speed$angle)
-
-# Summary statistics turning angle
-summary(data_speed$angle)
-
-# Histogram difference between incoming and outgoing speed
-hist(data_speed$speed_delta)
-
-# Summary statistics difference between incoming and outgoing speed
-summary(data_speed$speed_delta)
-quantile(data_speed$speed_delta, probs = 0.95, na.rm = TRUE)
-
-# Plot track, colour by speed
-ggmap(map_z14)+
-  geom_path(data=data_speed, aes(location_long, location_lat), colour = "white")+
-  geom_point(data=data_speed, aes(location_long, location_lat, colour = speed_delta))+
-  scale_colour_viridis_c()+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-Speeds were usually <2m/s and outgoing speeds while turning are likely <1m/s. A sharp turning angle was defined as <90 degrees. Sharp increase/decrease in speed also isn't expected, with the vast majority of difference between incoming and outgoing speed 0.1m/s.
-
-We defined biologically realistic movement as speeds <2m/s (a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind), turning speeds of 0.5m/s, and delta speed as 0.4m/s. 
-
-```{r}
-# Apply turning angle filtering
-data_sfilt <- data_speed %>%
-  filter(speed_in < 2) %>%
-  filter(speed_delta < 0.4) %>%
-  filter(!(speed_out >0.5 & angle <90))
-
-# Plot effect of filtering
-ggmap(map_z14)+
-  geom_path(data=data_raw, aes(location_long, location_lat), 
-            colour = "purple", alpha = .6)+
-  geom_point(data=data_raw, aes(location_long, location_lat), 
-             colour = "yellow")+
-  geom_point(data=data_qfilt, aes(location_long, location_lat), 
-             colour = "orange")+
-  geom_point(data=data_sfilt, aes(location_long, location_lat), 
-             colour = "purple")+
-  theme_void()+
-  facet_wrap(~id)
-```
-
-### 4) Median smoothing
-
-Even after speed/angle filtering, we retain some smaller-scale jitter. These are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We apply it sparingly, because an overly aggressive approach will cut down on real track tortuousity. 
-
-```{r}
-# Apply median smooth by bird
-data_smooth <- data.frame()
-
-for(i in 1:length(birds)){
-  
-  subset <- filter(data_sfilt, id == birds[i])
-  
-  temp <- atl_median_smooth(data = subset, x = "location_lat", y = "location_long",
-                                  time = "datetime", moving_window = 3)
-  
-  data_smooth <- rbind(data_smooth, temp)
-}
-
-# Plot effect of smoothing
-ggmap(map_z13)+
-  geom_path(data=data_raw, aes(location_long, location_lat), 
-            colour = "yellow", alpha = .6)+
-  geom_path(data=data_smooth, aes(location_long, location_lat), 
-            colour = "purple", alpha = .7)+
-  facet_wrap(~id)
-
-# And zoom in to the fenced area
-ggmap(map_z15)+
-  geom_path(data=data_raw, aes(location_long, location_lat), 
-            colour = "yellow", alpha = .6)+
-  geom_path(data=data_smooth, aes(location_long, location_lat), 
-            colour = "purple", alpha = .7)+
-  facet_wrap(~id)
-
-# And visualise without filtered out data
-ggmap(map_z15)+
-    geom_path(data=data_smooth, aes(location_long, location_lat), 
-            colour = "purple", alpha = .7)+
-  facet_wrap(~id)
-```
-
-*_Visual check using fence polygon._*
-We know Fauna didn't leave the study site during the tracking period so this is a good way to check if filtering was successful. Filter for points from "Fauna" outside of the polygon. 
-
-```{r}
-# Convert df to points
-points <- data_smooth %>%
-  filter(id=="Fauna") %>%
-  vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
-
-# Find points outside polygons
-outside <- points[!relate(points, mtr, "intersects")] %>%
-  as.data.frame(geom = "XY")
-  
-# Plot points outside polygon 
-ggmap(map_z15)+
-  geom_point(data=outside, aes(x, y), colour = "yellow", alpha = 0.7, size = 3)+
-  geom_spatvector(data=mtr, inherit.aes = FALSE, colour = "white", fill = NA)+
-  scale_colour_viridis_c()+
-  theme_void()
-```
-
-There are only 65 points outside the fence (given a 30m buffer) which is within tolerance. Interestingly they are all clustered on the southern and eastern fenceline, perhaps there was something about the topography or vegetation in that area that pronounced the errors.
-
-Based on this test subset, I am happy with the filtering parameters for this location.
-
-## Apply filtering 
-
-We apply all of the above steps to the full dataset. 
-
-### 1) Temporal filtering
-
-We removed points after the end of the study period (60 days after  at the start of next experiment - translocation to Orana).
-
-```{r}
-# Import data from movebank
+# Import data from movebank and filter on time
 data_raw <- readr::read_csv(fs::dir_ls(path = "movebank")) %>%
   clean_names() %>%
   # Time in posix format
   mutate(datetime = as.POSIXct(study_local_timestamp, "%Y-%m-%d %H:%M:%S"),
          date = as.Date(datetime)) %>%
+  # rename id column
+  rename(id = "individual_local_identifier") %>%
   # Remove days after end of study
-  filter(date < "2023-08-04") %>%
-  rename(id = individual_local_identifier)
-```
-
-### 2) Filtering by quality covariates
-
-We used the following quality covariates:
-
-* Altitude: set to a minimum of -10m (ground level allowing for some error) and a maximum of 60 (just above the 0.95 quartile on test data)
-* HDOP: set to a maximum of 2
-* Satellite count: set to a minimum of 4
-
-```{r}
-# read in FABDEM
-fabdem <- rast("data/S38E144_FABDEM_V1-0.tif") 
+  filter(date < "2023-08-05")
 
 # convert data to spatial points
 coords <- data_raw %>%
   vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326")
 
-# Extract dem and add to dataframe
-data_alt <- data_raw %>%
-  mutate(terra::extract(fabdem, coords, ID = FALSE)) %>%
-  rename(elevation = "S38E144_FABDEM_V1-0") %>%
-  # calculate flight height
-  mutate(altitude = height_above_msl - elevation)
-
-# Apply quality covariate filters
-data_qfilt <- data_alt %>%
-  filter(gps_satellite_count >= 4) %>%
-  filter(gps_hdop <=2) %>%
-  filter(altitude < 60 & altitude >-10)
+# filter on location to inside fence (with 30m buffer)
+data_lfilt <- terra::intersect(coords, buffer(mtr, 30)) %>%
+  as.data.frame(geom = "XY") %>%
+  # replace data for marmalade and nutmeg with original
+  filter(!id %in% c("Marmalade", "Nutmeg")) %>%
+  rename("location_long" = "x", "location_lat" = "y") %>%
+  rbind(filter(data_raw, id %in% c("Marmalade", "Nutmeg")))
 
 # Filtering effect
-print(paste("Percentage original data removed: ", round(((nrow(data_raw)-nrow(data_qfilt)) / nrow(data_raw))*100), "%", sep = ""))
+print(paste("Percentage original data removed: ", round(((nrow(data_raw)-nrow(data_lfilt)) / nrow(data_raw))*100), "%", sep = ""))
 ```
 
-Percentage original data removed: 28%
+Percentage original data removed: 1% (41% with time)
 
-### 3) Filtering biologically unrealistic movement
+## 2) Filtering by quality covariates
 
-We defined (from test data) biologically realistic movement as speeds <2m/s (a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind), turning speeds of 0.5m/s, and delta speed as 0.4m/s. 
+In the past I've found filtering by satellite count and hdop can remove errors, but when applied with the wrong parameters they can have a high rate of false positives (removing real movement) and low rate of true positives (removing unrealistic movement) so we don't want to be overly aggressive with the application of these filters.
+
+```{r}
+# Stats satellite vales
+hist(data_lfilt$gps_satellite_count)
+summary(data_lfilt$gps_satellite_count)
+quantile(data_lfilt$gps_satellite_count, probs = 0.01, na.rm = TRUE)
+
+# Stats hdop vales
+hist(data_lfilt$gps_hdop)
+hist(data_lfilt$gps_hdop, breaks = 200, xlim = c(0,3))
+summary(data_lfilt$gps_hdop)
+quantile(data_lfilt$gps_hdop, probs = 0.99, na.rm = TRUE)
+```
+
+Most points have a satellite count >4. 
+
+There are a handful of massive hdop values (5-15) but the vast majority are <2 and the 99th percentile is 2.
+
+Applying these quality covariates:
+
+* HDOP: <2
+* Satellite count: > 4
+
+```{r}
+# Apply quality covariate filters
+data_qfilt <- data_lfilt %>%
+  filter(gps_satellite_count > 4) %>%
+  filter(gps_hdop < 2)
+
+# Filtering effect
+print(paste("Percentage original data removed: ", round(((nrow(data_lfilt)-nrow(data_qfilt)) / nrow(data_lfilt))*100), "%", sep = ""))
+```
+
+Percentage original data removed: 3%
+
+## 3) Filtering biologically unrealistic movement
+
+To remove spikes in the data we can filter out positions with extreme incoming and outgoing speeds. First we need to define biologically realistic incoming and outgoing speeds.
 
 ```{r}
 # Append turning angle, incoming/outgoing/delta speeds to data frame per bird
-birds <- unique(data_raw$id)
+birds <- unique(data_qfilt$id)
 
 data_speed <- data.frame()
 
@@ -547,28 +277,50 @@ for(i in 1:length(birds)){
     speed_out = atl_get_speed(
            data = subset, x = "utm_easting", y = "utm_northing", time = "datetime", type = c("out")),
     angle = atl_turning_angle(
-           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime"),
-    speed_delta = abs(speed_in - speed_out)
+           data = subset, x = "utm_easting", y = "utm_northing", time = "datetime")
     )
  
  data_speed <- rbind(data_speed, temp)
 }
 
+# Stats incoming speeds
+hist(data_speed$speed_in)
+summary(data_speed$speed_in)
+quantile(data_speed$speed_in, probs = 0.99, na.rm = TRUE)
+
+# Stats outgoing speeds
+hist(data_speed$speed_out)
+summary(data_speed$speed_out)
+quantile(data_speed$speed_out, probs = 0.99, na.rm = TRUE)
+
+# Hist turning angle
+hist(data_speed$angle)
+
+# Filter to points with turning angle <90
+turn <- filter(data_speed, angle < 90)
+summary(turn$speed_out, na.rm = TRUE)
+quantile(turn$speed_out, probs = 0.99, na.rm = TRUE)
+```
+
+We defined biologically realistic movement as speeds < 1.62m/s (from 99th percentile; a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind) and turning speeds of < 1.25. 
+
+```{r}
 # Apply turning angle and speed filtering
 data_sfilt <- data_speed %>%
-  filter(speed_in < 2) %>%
-  filter(speed_delta < 0.4) %>%
-  filter(!(speed_out >0.5 & angle <90))
+  filter(speed_in < 1.62) %>%
+  filter(speed_out < 1.62) %>%
+  filter(!(speed_out > 1.25 & angle <90)) %>%
+  filter(!(speed_in > 1.25 & angle <90))
 
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_qfilt)-nrow(data_sfilt)) / nrow(data_qfilt))*100), "%", sep = ""))
 ```
 
-Percentage original data removed: 7%
+Percentage original data removed: 2%
 
-### 4) Median smoothing
+## 4) Median smoothing
 
-To remove small-scale jitter. We used the smallest possible moving window (3) to retain as much real movement as possible. 
+Even after speed/angle filtering, we retain some smaller-scale jitter. These are challenging to remove as they lie within the bounds of realistic movement. Median resampling is a method of smoothing the track to reduce jitter. We apply it sparingly, because an overly aggressive approach will cut down on real track tortuousity.  
 
 ```{r}
 # Apply median smooth by bird
@@ -578,20 +330,53 @@ for(i in 1:length(birds)){
   
   subset <- filter(data_sfilt, id == birds[i])
   
-  temp <- atl_median_smooth(data = subset, x = "location_lat", y = "location_long",
+  temp <- atl_median_smooth(data = subset, x = "location_long", y = "location_lat",
                                   time = "datetime", moving_window = 3)
   
   data_smooth <- rbind(data_smooth, temp)
 }
-
-# Plot smoothed data
-ggmap(map_z14)+
-  geom_path(data=data_smooth, aes(location_long, location_lat, colour = id), alpha = .7)+
-  scale_colour_viridis_d()+
-  theme_void()
 ```
 
-Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data when required instead. 
+Plot outcome to check.
+
+```{r}
+# raw data overlaid with cleaning steps
+ggplot()+
+  geom_scattermore(data=data_lfilt, aes(location_long, location_lat), colour = "red")+
+  geom_scattermore(data=data_qfilt, aes(location_long, location_lat), colour = "yellow")+
+  geom_scattermore(data=data_sfilt, aes(location_long, location_lat), colour = "blue")+
+  theme_void()
+
+# smoothed data only
+ggmap(map_z15)+
+  geom_path(data=data_sfilt, aes(location_long, location_lat, colour = id), alpha = .7)+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/smoothed by id.jpeg", dpi = 500, width = 20, height = 20, units = "cm")
+```
+
+Looks like the precise end time for Star was not correct on movebank - seems to have the GPS unit moving back to the office after the mortality retrieval. But not an issue since this bird excluded from analyses. 
+
+Checking the sampling rate of the smoothed data.
+
+```{r}
+steps <- data_smooth %>%
+  make_track(.x = location_long, .y = location_lat, .t = datetime, id = id) %>%
+  nest(data = -"id")
+
+sampling_rates <- steps %>%
+  transmute(id, summary = map(data, summarize_sampling_rate)) %>%
+  unnest(summary)
+
+sampling_rates
+summary(sampling_rates$mean)
+```
+
+The mean sampling rate is 6 minutes.
+
+Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data instead.
 
 ```{r}
 # Convert data to spatial and reproject in utm
@@ -607,7 +392,7 @@ coords <- st_coordinates(points$geometry)
 # format data frame for saving to disk
 data <- data_smooth %>%
   # select columns to keep
-  dplyr::select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature", "altitude")) %>%
+  dplyr::select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature")) %>%
   # rename columns
   rename(longitude = location_long,
          latitude = location_lat,
@@ -641,12 +426,6 @@ data <- read.csv("data/data_cleaned.csv") %>%
                                  tz = "UTC")) %>%
   # Add date
   mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
-
-# Plot cleaned data to check
-ggmap(map_z14)+
-  geom_path(data=data, aes(longitude, latitude, colour = id), alpha = .7)+
-  scale_colour_viridis_d()+
-  theme_void()
 ```
 
 Calculate basic summary statistics. 
@@ -666,7 +445,7 @@ print(data %>%
   summarise(birddays = sum(days)))
 ```
 
-Birds were tracked for a total of 284 days between October 2022 and August 2023 for a total of 3533 tracking days (sum of each bird's tracking duration). 
+Birds were tracked for a total of 285 days between October 2022 and August 2023 for a total of 3560 tracking days (sum of each bird's tracking duration). 
 
 Wobbles and Star tracked for less than two weeks and excluded from further analyses. 
 
@@ -686,7 +465,7 @@ suntime <- getSunlightTimes(date = unique(data$date),
                             lon = 144.43,
                             keep = c("sunrise", "sunset"),
                             tz = "Australia/Melbourne") %>%
-  subset(dplyr::select = -c(lat, lon)) 
+  select(-c(lat, lon))
 
 # Append to data frame
 data_sun <- left_join(data, suntime) %>%
@@ -823,6 +602,8 @@ ggplot(distance_daily)+
   scale_y_discrete(expand = expansion(add = c(0, 2)))+
   xlab("Distance moved daily (m)") + 
   theme(axis.title.y=element_blank())
+
+ggsave("plots/distance by id.jpeg", dpi = 500, width = 10, height = 15, units = "cm")
 ```
 
 ## Roost establishment
@@ -872,7 +653,7 @@ for (i in 1:length(birds)){
     
     #subset by bird and date
     subset <- subset(data_day, id == birds[i] & date == days[j],
-                    dplyr::select= c(easting, northing))
+                     c(easting, northing))
     # skip days where not enough points
       if (length(subset$easting)<4){next}
     
@@ -923,7 +704,7 @@ How far between consecutive roosts?
 
 ```{r}
 # read in roost locations, format as spatial
-roosts <- read.csv("data/daily_roost_location.csv") %>%
+roosts <- read.csv("results/daily_roost_location.csv") %>%
   dplyr::select(!"npoints") %>%
   vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
   st_as_sf()
@@ -1036,15 +817,6 @@ distance_roosts2 <- distance_roosts_latlon %>%
   mutate(longitude = st_coordinates(distance_roosts_latlon$geometry)[,1],
          latitude = st_coordinates(distance_roosts_latlon$geometry)[,2])
 
-# plot on map without the far nutmeg point
-ggmap(map_z15)+
-  geom_path(data = filter(distance_roosts2, distance_previous<2000),
-          aes(longitude, latitude, group = id), colour = "white", alpha = 0.6, inherit.aes = FALSE)+
-    geom_point(data = filter(distance_roosts2, distance_previous<2000),
-          aes(longitude, latitude, colour = distance_previous), inherit.aes = FALSE)+
-  scale_colour_viridis_c()+
-  theme_void()
-
 # write to file
 write.csv(distance_roosts2, "results/daily_distance_between_roosts.csv", row.names = FALSE)
 ```
@@ -1075,22 +847,31 @@ dist <- roosts %>%
   group_by(date, id) %>%
   filter(dist_release == max(dist_release)) %>%
   ungroup() %>%
-  # add cohort information
-  left_join(dplyr::select(metadata, c("cohort", "id"))) %>%
   # format date as a date
   mutate(date = as_date(date)) %>%
   # arrange by date
   arrange(date) %>%
-  # drop geometry
+  # transform to lat lon
+  vect() %>%
+  project("EPSG:4326")
+
+# plot roosts with colour as distance from release
+ggmap(map_z15)+
+  geom_sf(data = dist, aes(colour = dist_release), inherit.aes = FALSE)+
+  scale_colour_viridis_c()+
+  theme_void()
+
+# format as data frame
+dist <- st_as_sf(dist) %>%
   st_drop_geometry()
 
 # save to file
 write.csv(dist, "results/daily_roost_distance_from_release.csv", row.names = FALSE)
 ```
 
-## Home range
+## Home range and core range
 
-Home range change is another way to investigate post-release behavioural modification. Previous studies have demonstrated decreasing home ranges over time as individuals first explore their new surrounds and then settle on a core area of exploitation. We define home range as 50% kernel utilisation distribution, with both nocturnal and diurnal fixes.
+Home range change is another way to investigate post-release behavioural modification. Previous studies have demonstrated decreasing home ranges over time as individuals first explore their new surrounds and then settle on a core area of exploitation. We define home range as 90% KUD and core range as 50% KUD, with both nocturnal and diurnal fixes.
 
 ```{r}
 # Read in cleaned data 
@@ -1107,78 +888,86 @@ data <- read.csv("data/data_cleaned.csv") %>%
 # set up data in spatial points dataframe
 locs <- SpatialPointsDataFrame(coordinates(
   cbind(data$easting, data$northing)), data = data)
-```
 
-Core area 50% KUD
-
-```{r}
-# core range polygon per bird per day 🐢🐢 2.5 hours
+# home range polygon per bird per day 🐢 1 hour
 birds <- as.character(unique(data$id))
 days <- unique(locs[["date"]])
 
+# Create empty dataframes for both 50% and 90% KUDs
 hr50_daily <- data.frame()
-
-for (i in 1:length(birds)){
-  for (j in 1:length(days)){
-    points <- subset(locs, id == birds[i] & date == days[j],
-                     select = id)
-    if (length(points)<5){
-      next
-    }
-    kud <- kernelUD(points[,1], h="href", grid=1000, extent = 4) %>% 
-      getverticeshr(percent = 50)
-    
-    proj4string(kud) <- CRS("EPSG:32755")
-    
-    kud_df_utm <- st_as_sf(kud)%>%
-      mutate(date = days[j])
-    
-    print(head(kud_df_utm, n= 1L))
-    
-    hr50_daily <- rbind.data.frame(hr50_daily, kud_df_utm)
-  }}
-
-# extract area per day i.e. drop geometry
-hr50_area <- st_drop_geometry(hr50_daily)
-
-# save to file
-write.csv(hr50_area, "results/daily_hr50_area.csv", row.names = TRUE)
-```
-
-Home range 90% KUD - changed grid and extent to optimise, takes 1 hour now. 
-
-```{r}
-# home range polygon per bird per day 🐢🐢 2.5 hours
-birds <- as.character(unique(data$id))
-days <- unique(locs[["date"]])
-
 hr90_daily <- data.frame()
 
 for (i in 1:length(birds)){
   for (j in 1:length(days)){
     points <- subset(locs, id == birds[i] & date == days[j],
                      select = id)
-    if (length(points)<5){
+    if (length(points) < 5){
       next
     }
-    kud <- kernelUD(points[,1], h="href", grid=400, extent = 7) %>% 
-      getverticeshr(percent = 90)
     
-    proj4string(kud) <- CRS("EPSG:32755")
+    # Calculate KUD once
+    kud <- kernelUD(points[,1], h="href", grid=250, extent = 6)
     
-    kud_df_utm <- st_as_sf(kud)%>%
-      mutate(date = days[j])
+    # Get both 50% and 90% contours from the same KUD object
+    kud90 <- getverticeshr(kud, percent = 90)
+    kud50 <- getverticeshr(kud, percent = 50)
     
-    print(head(kud_df_utm, n= 1L))
+    # Set projection for both
+    proj4string(kud90) <- CRS("EPSG:32754")
+    proj4string(kud50) <- CRS("EPSG:32754")
     
-    hr90_daily <- rbind.data.frame(hr90_daily, kud_df_utm)
-  }}
+    # Convert to sf and add date
+    kud90_df_utm <- st_as_sf(kud90) %>%
+      mutate(date = days[j], 
+             id = birds[i],
+             hr_level = "90")
+    
+    kud50_df_utm <- st_as_sf(kud50) %>%
+      mutate(date = days[j], 
+             id = birds[i],
+             hr_level = "50")
+    
+    # Append to respective dataframes
+    hr90_daily <- rbind.data.frame(hr90_daily, kud90_df_utm)
+    hr50_daily <- rbind.data.frame(hr50_daily, kud50_df_utm)
+    
+    # Print progress
+    print(paste("Completed:", birds[i], "on", days[j]))
+  }
+}
+
+# plot
+
+
+# clip to fenced area (larger home ranges currently go beyond the fence linking points)
+hr90_daily_clip <- hr90_daily %>%
+  vect() %>%
+  project("EPSG:4326") %>%
+  crop(fence) %>%
+  st_as_sf()
+
+hr50_daily_clip <- hr50_daily %>%
+  vect() %>%
+  project("EPSG:4326") %>%
+  crop(fence) %>%
+  st_as_sf()
+
+# plot
+
+# save clipped shapefiles
+st_write(hr90_daily_clip, "shapefiles/hr_90_fence_clip.shp", append = FALSE)
+
+st_write(hr50_daily_clip, "shapefiles/hr_50_fence_clip.shp", append = FALSE)
 
 # extract area per day i.e. drop geometry
-hr90_area <- st_drop_geometry(hr90_daily)
+hr_area <- st_drop_geometry(hr90_daily_clip) %>%
+  rbind(st_drop_geometry(hr50_daily_clip)) %>%
+  pivot_wider(names_from = hr_level, values_from = area) %>%
+  rename(kud90 = "90",
+         kud50 = "50")
 
 # save to file
-write.csv(hr90_area, "results/daily_hr90_area.csv", row.names = TRUE)
+write.csv(hr_area, "results/daily_hr.csv", row.names = FALSE)
 ```
 
 # Conspecific interactions
@@ -1420,58 +1209,32 @@ First plot with weighted edges and nodes sized by degree centrality (number of e
 ```{r}
 # set seed to keep layout static
 set.seed(4739)
-networkfr1 <- create_layout(network1, layout = "fr") 
+layout1 <- create_layout(network1, layout = "fr") 
 
 # plot with tidygraph (wrapper for igraph in tidy API)
-ggraph(networkfr1)+
-  # format edge colour, alpha and width by the weight (proximity)
-  geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2), 
-                show.legend = FALSE)+
-  scale_edge_color_continuous(low = "grey", high = "slateblue3")+ 
+ggraph(layout1)+
+  # vary edge alpha by weight
+  geom_edge_fan(aes(alpha = weight), show.legend = FALSE) +
   # node basic
   geom_node_point(size = 7, shape = 16)+
   # add labels
-  #geom_node_text(aes(label = name), nudge_y = 0.15)+
+  geom_node_text(aes(label = name), nudge_y = 0.15)+
   # theme
   theme_void()
 ```
 
-Next calculate community - first deciding on clustering algorithm.
-
-Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750) I will try edge betweenness, walktrap, spinglass and infomap, because I have a small dense network and these perform well in that use case. 
+Next calculate community. Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750) Using spinglass because I have a small dense network and these perform well in that use case. 
 
 ```{r}
-# community with edge betweenness
-eb <- cluster_edge_betweenness(network1)
-length(eb)
-modularity(eb)
-membership(eb)
-
-# community with walktrap
-w <- cluster_walktrap(network1)
-length(w)
-modularity(w)
-membership(w)
-
 # community with spinglass
-sg <- cluster_spinglass(network1)
-length(sg)
-modularity(sg)
-membership(sg)
+com <- cluster_spinglass(network1)
+length(com)
+modularity(com)
+membership(com)
 
-# community with infomap
-im <- cluster_infomap(network1)
-length(im)
-modularity(im)
-membership(im)
-```
-
-They all turned out the same, I'll use walktrap. Plot with community.
-
-```{r}
 # add community to network layout
-comm1 <- networkfr1 %>%
-  mutate(community = as.factor(membership(w)))
+g1 <- layout1 %>%
+  mutate(community = as.factor(membership(com)))
 ```
 
 ### Residents and reinforcers
@@ -1513,41 +1276,54 @@ summary(transitivity(network2, "local"))
 
 We have a network of 28 individuals (nodes) and 377 edges with an edge density of 99.7% (only one dyad doesn't have an edge, Sofi & Daisy). The network is continuous (i.e. all nodes in network are connected) and the maximum degree of separation is two. 
 
-Calculate community with walktrap method.
-
 ```{r}
-# community with walktrap
-w2 <- cluster_walktrap(network2, steps = 10)
-length(w2)
-modularity(w2)
-membership(w2)
-
 # set seed to keep layout static
-set.seed(0000)
-networkfr2 <- create_layout(network2, layout = "fr") 
+set.seed(1223)
+layout2 <- create_layout(network2, layout = "") 
 
-# add community and cohort to network layout
-comm2 <- networkfr2 %>%
-  rename(id = name) %>%
-  mutate(community = as.factor(membership(w2))) %>%
-  left_join(select(metadata, c(id, cohort)))
-
-hist(E(network2)$weight)
+# plot with tidygraph (wrapper for igraph in tidy API)
+ggraph(layout2)+
+  # vary edge alpha by weight
+  geom_edge_fan(aes(alpha = weight), show.legend = FALSE) +
+  # node basic
+  geom_node_point(size = 7, shape = 16)+
+  # add labels
+  geom_node_text(aes(label = name), nudge_y = 0.15)+
+  # theme
+  theme_void()
 ```
 
-Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was off to the side but ended up in the mixed group. 
+Calculate community with spinglass method.
+
+```{r}
+# community with spinglass
+com <- cluster_spinglass(network2)
+length(com)
+modularity(com)
+membership(com)
+
+# add community to network layout
+g2 <- n2 %>%
+  mutate(community = as.factor(membership(com)))
+```
+
+Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was not a member of either group.
 
 ### SNA figure
 
 ```{r}
+# set seed to keep layout static
+set.seed(0000)
+
 # resident network
+
 n1 <- ggraph(comm1)+
   # community polygon
   geom_mark_hull(aes(x = x, y = y, fill = community), 
                  colour = "white", alpha = 0.2, expand = unit(0.5, "cm"),
                  show.legend = FALSE)+
   
-  scale_fill_manual(values = c("grey10", "grey60"))+
+  #scale_fill_manual(values = c("grey10", "grey60"))+
   # format edge colour, alpha and width by the weight (proximity)
   geom_edge_fan(aes(colour = weight, alpha = weight, linewidth = weight/2),
                 show.legend = FALSE)+
@@ -1560,6 +1336,15 @@ n1 <- ggraph(comm1)+
               plot_margin = margin(10, 60, 0, 60))
 
 # reinforcer network
+## network layout
+networkfr2 <- create_layout(network2, layout = "fr") 
+
+## add community and cohort to network layout
+comm2 <- networkfr2 %>%
+  rename(id = name) %>%
+  mutate(community = as.factor(membership(w2))) %>%
+  left_join(select(metadata, c(id, cohort)))
+
 n2 <- ggraph(comm2)+
   # communities polygons
   geom_mark_hull(aes(x = x, y = y, fill = community), 
