@@ -359,23 +359,6 @@ ggsave("plots/smoothed by id.jpeg", dpi = 500, width = 20, height = 20, units = 
 
 Looks like the precise end time for Star was not correct on movebank - seems to have the GPS unit moving back to the office after the mortality retrieval. But not an issue since this bird excluded from analyses. 
 
-Checking the sampling rate of the smoothed data.
-
-```{r}
-steps <- data_smooth %>%
-  make_track(.x = location_long, .y = location_lat, .t = datetime, id = id) %>%
-  nest(data = -"id")
-
-sampling_rates <- steps %>%
-  transmute(id, summary = map(data, summarize_sampling_rate)) %>%
-  unnest(summary)
-
-sampling_rates
-summary(sampling_rates$mean)
-```
-
-The mean sampling rate is 6 minutes.
-
 Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data instead.
 
 ```{r}
@@ -889,7 +872,7 @@ data <- read.csv("data/data_cleaned.csv") %>%
 locs <- SpatialPointsDataFrame(coordinates(
   cbind(data$easting, data$northing)), data = data)
 
-# home range polygon per bird per day 🐢 1 hour
+# home range polygon per bird per day 🐢 40 minutes
 birds <- as.character(unique(data$id))
 days <- unique(locs[["date"]])
 
@@ -913,8 +896,8 @@ for (i in 1:length(birds)){
     kud50 <- getverticeshr(kud, percent = 50)
     
     # Set projection for both
-    proj4string(kud90) <- CRS("EPSG:32754")
-    proj4string(kud50) <- CRS("EPSG:32754")
+    proj4string(kud90) <- CRS("EPSG:32755")
+    proj4string(kud50) <- CRS("EPSG:32755")
     
     # Convert to sf and add date
     kud90_df_utm <- st_as_sf(kud90) %>%
@@ -936,41 +919,29 @@ for (i in 1:length(birds)){
   }
 }
 
+# convert to lat lon for plotting
+hr90_daily_ll <- st_transform(hr90_daily, "EPSG:4326")
+hr50_daily_ll <- st_transform(hr50_daily, "EPSG:4326")
+
 # plot home range map
 ggmap(map_z15)+
-  geom_sf(data = hr90_daily, aes(colour = id), inherit.aes = FALSE)+
-  scale_colour_viridis_c()+
+  geom_sf(data = hr90_daily_ll, aes(fill = id), alpha = 0.2, inherit.aes = FALSE)+
+  scale_colour_viridis_d()+
   theme_void()
 
 # plot core range map
 ggmap(map_z15)+
-  geom_sf(data = dist, aes(colour = dist_release), inherit.aes = FALSE)+
-  scale_colour_viridis_c()+
+  geom_sf(data = hr50_daily_ll, aes(fill = id), alpha = 0.2, inherit.aes = FALSE)+
+  scale_colour_viridis_d()+
   theme_void()
 
-
-# clip to fenced area (larger home ranges currently go beyond the fence linking points)
-hr90_daily_clip <- hr90_daily %>%
-  vect() %>%
-  project("EPSG:4326") %>%
-  crop(fence) %>%
-  st_as_sf()
-
-hr50_daily_clip <- hr50_daily %>%
-  vect() %>%
-  project("EPSG:4326") %>%
-  crop(fence) %>%
-  st_as_sf()
-
-# plot
-
-# save clipped shapefiles
-st_write(hr90_daily_clip, "shapefiles/hr_90_fence_clip.shp", append = FALSE)
-st_write(hr50_daily_clip, "shapefiles/hr_50_fence_clip.shp", append = FALSE)
+# save  shapefiles
+st_write(hr90_daily_ll, "shapefiles/hr_90.shp")
+st_write(hr50_daily_ll, "shapefiles/hr_50.shp", append = FALSE)
 
 # extract area per day i.e. drop geometry
-hr_area <- st_drop_geometry(hr90_daily_clip) %>%
-  rbind(st_drop_geometry(hr50_daily_clip)) %>%
+hr_area <- st_drop_geometry(hr90_daily) %>%
+  rbind(st_drop_geometry(hr50_daily)) %>%
   pivot_wider(names_from = hr_level, values_from = area) %>%
   rename(kud90 = "90",
          kud50 = "50")
@@ -1011,11 +982,11 @@ sampling_rates <- steps %>%
   transmute(id, summary = map(data, summarize_sampling_rate)) %>%
   unnest(summary)
 
-mean(sampling_rates$mean)*60
-mean(sampling_rates$sd)*60
+mean(sampling_rates$mean)
+mean(sampling_rates$sd)
 ```
 
-The mean sampling rate for the cleaned data is 8 minutes. We will use a time parameter of 4 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
+The mean sampling rate for the cleaned data is 6 minutes. We will use a time parameter of 3 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
 
 First format tracks as move2 objects for use in wildlifeDI.
 
@@ -1038,8 +1009,8 @@ temp <- seq.Date(from = as_date("2023-06-01"), to = as_date("2023-06-07"), by = 
 move_subset <- filter(move, date %in% temp)
 
 # plot distribution of paired fixes by distance
-dcPlot(move_subset,tc=4*60,dmax=500)
-dcPlot(move_subset,tc=4*60,dmax=100)
+dcPlot(move_subset,tc=3*60,dmax=500)
+dcPlot(move_subset,tc=3*60,dmax=100)
 ```
 
 The majority of contacts took place <40m apart. I'll retain the guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty of approx 20m (on cleaned data).
@@ -1069,7 +1040,7 @@ Sys.time()
 test <- Ca(dyad, tc=4*60, dc=30);Sys.time()
 ```
 
-The test dyad took 47 seconds so I'm anticipating the full set of 78 interactions will take 1 hour. 
+The test dyad took 1:49 so I'm anticipating the full set of 78 interactions will take 2.3 hours. 
 
 ```{r}
 # list of residents
@@ -1112,7 +1083,7 @@ hist(interact2$prox)
 summary(interact2$prox)
 ```
 
-Mean proximity score is 13.1%, min is no interaction and max is 43.8%. 
+Mean proximity score is 13%, min is no interaction and max is 70%. 
 
 ### Residents and reinforcers
 
@@ -1166,7 +1137,7 @@ hist(interact2$prox)
 summary(interact2$prox)
 ```
 
-Summary stats here
+Mean proximity score is 11%, min is <1% and max is 37%. 
 
 ## Social network
 
