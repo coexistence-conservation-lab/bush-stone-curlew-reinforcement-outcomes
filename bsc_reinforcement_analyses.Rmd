@@ -22,12 +22,19 @@ map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
 map_z14 <- get_map(c(144.4380, -37.9000), zoom=14, maptype = "satellite")
 map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
 map_z16 <- get_map(c(144.4380, -37.9000), zoom=16, maptype = "satellite")
+```
 
-# Metadata - translocation information
-metadata  <- read.csv("data/metadata.csv") %>%
-  clean_names() %>%
-  rename(id = identity)
+# Introduction
 
+Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts and therefore have cohorts released into the presence of conspecifics. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
+
+Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour in response to reinforcement?
+
+## Study site
+
+Mt Rothwell Biodiversity Information Center (-37.8957, 144.4384, hereafter: Mt Rothwell), is a 473ha predator-exclusion fenced sanctuary and captive breeding facility in Victoria, on the traditional lands of the Wathawurrung people. Mt Rothwell is managed by the Odonata Foundation as part of a sanctuary network in southeast Australia. The sanctuary is free from the red fox, Vulpes vulpes, and feral cat, Felis catus, which are exotic predators that have contributed to the decline of Australian wildlife .
+
+```{r}
 # Define fence polygons (zones 1 and 2)
 mtr <- rbind(
   ## zone 1
@@ -63,16 +70,6 @@ mtr <- rbind(
   # transpose
   t()
 ```
-
-# Introduction
-
-Reinforcement is a form of conservation translocation used to stabilise or enhance populations. Reinforcement is also a stage within other forms of translocation, which usually involve multiple release cohorts and therefore have cohorts released into the presence of conspecifics. Even a reintroduction project will have conspecifics present from the second release. Benefits of reinforcing release are assumed but rarely empirically tested – and if they are its usually from perspective of reinforcing individuals, not the population as a whole. Outcomes of reinforcement are mediated by social interactions, which are also assumed but not often empirically tested. 
-
-Here we test the outcomes of reinforcement for a population of bush stone-curlew where all individuals in the population (resident and reinforcing) are accounted for and tracked with GPS. We ask: do the cohorts integrate? Do social interactions benefit the reinforcing cohort? And, do the residents change their behaviour in response to reinforcement?
-
-## Study site
-
-Mt Rothwell Biodiversity Information Center (-37.8957, 144.4384, hereafter: Mt Rothwell), is a 473ha predator-exclusion fenced sanctuary and captive breeding facility in Victoria, on the traditional lands of the Wathawurrung people. Mt Rothwell is managed by the Odonata Foundation as part of a sanctuary network in southeast Australia. The sanctuary is free from the red fox, Vulpes vulpes, and feral cat, Felis catus, which are exotic predators that have contributed to the decline of Australian wildlife .
 
 Here I make an map of the site with an Australia context inset for publication.
 
@@ -167,9 +164,17 @@ site <- ggmap(map_mtr)+
 
 We translocated 35 adult captive-bred bush stone-curlews from Mt Rothwell captive colony to Mt Rothwell Zone 1 (fenced sanctuary) in two stages. The first (pilot) cohort of 16 birds was released between October 2022 and June 2023. The second (reinforcing) cohort of 20 birds was released in June 2023. One bird in the first cohort was taken back into captivity after a single day and re-released in the second cohort; hence total 35 individuals.
 
+```{r}
+# Metadata - translocation information
+metadata  <- read.csv("data/metadata.csv") %>%
+  clean_names() %>%
+  rename(id = identity)
+```
+
+
 ## Telemetry
 
-All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaining birds except one, ahead of the 3G shutdown).
+All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaining birds (except one which could not be recaught), ahead of the 3G shutdown).
 
 The study period for this analysis ends 5th August 2023, when half of the reinforcing cohort were translocated to a secondary site (Orana).
 
@@ -186,9 +191,13 @@ High throughput animal tracking data require filtering to remove erroneous point
 
 First step of temporal filtering was done on movebank, where the start and end of deployments were specified for each individual. The start time was the time of release and the end time was when the GPS unit was removed or the last known point in the case of the deceased and missing birds.
 
-We removed points after the end of the study period (5/8/23, at the start of next experiment - translocation to Orana).
+Here we removed points after the end of the study period (5/8/23, at the start of next experiment - translocation to Orana).
 
 Spatial filtering can be done to the area of interest. Only two of the birds (Marmalade and Nutmeg) left the sanctuary (other than during mortality events) so for all others we filter to the fence with a buffer of 30m. 
+
+We also excluded Star and Wobbles from the analyses because they died early (8 and 9 days).
+
+To save on plotting power, I'm checking with 4 birds: Marmalade and Nutmeg (who had the best flight during the study and left the sanctuary) and Zeus and Riley (who did not have flight but did have very 'jittery' tracks with lots of obvious spikes).
 
 ```{r}
 # Import data from movebank and filter on time
@@ -212,13 +221,28 @@ data_lfilt <- terra::intersect(coords, buffer(mtr, 30)) %>%
   # replace data for marmalade and nutmeg with original
   filter(!id %in% c("Marmalade", "Nutmeg")) %>%
   rename("location_long" = "x", "location_lat" = "y") %>%
-  rbind(filter(data_raw, id %in% c("Marmalade", "Nutmeg")))
+  rbind(filter(data_raw, id %in% c("Marmalade", "Nutmeg"))) %>%
+  arrange(id)
 
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_raw)-nrow(data_lfilt)) / nrow(data_raw))*100), "%", sep = ""))
+
+# Plot to check
+subset_raw <- filter(data_raw, id %in% c("Marmalade", "Nutmeg", "Riley", "Zeus"))
+subset_lfilt <- filter(data_lfilt, id %in% c("Marmalade", "Nutmeg", "Riley", "Zeus"))
+
+ggmap(map_z13)+
+  geom_path(data = subset_raw, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = subset_raw, aes(location_long, location_lat), colour = "red")+
+  geom_point(data = subset_lfilt, aes(location_long, location_lat), colour = "blue")+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/filtering step 1.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
 ```
 
-Percentage original data removed: 1% (41% with time)
+Percentage original data removed: 1%
 
 ## 2) Filtering by quality covariates
 
@@ -237,30 +261,57 @@ summary(data_lfilt$gps_hdop)
 quantile(data_lfilt$gps_hdop, probs = 0.99, na.rm = TRUE)
 ```
 
-Most points have a satellite count >4. 
+Most points have a satellite count >4 
 
-There are a handful of massive hdop values (5-15) but the vast majority are <2 and the 99th percentile is 2.
+There are a handful of massive hdop values (5-15) but most are < 2
 
 Applying these quality covariates:
 
-* HDOP: <2
 * Satellite count: > 4
+* HDOP: < 2
+
+I also filter for duplicate timestamps. 
 
 ```{r}
+# Check for duplicates
+dupes <- data_lfilt %>% 
+  arrange(id, datetime) %>%
+  group_by(id) %>%
+  summarise(total_fixes = n(),
+            unique_times = n_distinct(datetime),
+            duplicates = total_fixes - unique_times)
+  
 # Apply quality covariate filters
 data_qfilt <- data_lfilt %>%
   filter(gps_satellite_count > 4) %>%
-  filter(gps_hdop < 2)
+  filter(gps_hdop < 2) %>%
+  # remove duplicates
+  group_by(id, datetime) %>%
+  slice(1) %>%
+  ungroup()
 
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_lfilt)-nrow(data_qfilt)) / nrow(data_lfilt))*100), "%", sep = ""))
+
+# Plot to check
+subset_qfilt <- filter(data_qfilt, id %in% c("Marmalade", "Nutmeg", "Riley", "Zeus"))
+
+ggmap(map_z14)+
+  geom_path(data = subset_lfilt, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = subset_lfilt, aes(location_long, location_lat), colour = "red")+
+  geom_point(data = subset_qfilt, aes(location_long, location_lat), colour = "blue")+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/filtering step 2.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
 ```
 
 Percentage original data removed: 3%
 
 ## 3) Filtering biologically unrealistic movement
 
-To remove spikes in the data we can filter out positions with extreme incoming and outgoing speeds. First we need to define biologically realistic incoming and outgoing speeds.
+To remove spikes in the data we can filter out positions with extreme incoming and outgoing speeds, especially when the birds are turning (where fast speeds are less likely). First we need to define biologically realistic incoming and outgoing speeds.
 
 ```{r}
 # Append turning angle, incoming/outgoing/delta speeds to data frame per bird
@@ -280,43 +331,83 @@ for(i in 1:length(birds)){
            data = subset, x = "utm_easting", y = "utm_northing", time = "datetime")
     )
  
- data_speed <- rbind(data_speed, temp)
+ data_speed <- rbind(data_speed, temp) %>%
+   na.omit()
 }
 
 # Stats incoming speeds
 hist(data_speed$speed_in)
 summary(data_speed$speed_in)
-quantile(data_speed$speed_in, probs = 0.99, na.rm = TRUE)
 
 # Stats outgoing speeds
 hist(data_speed$speed_out)
 summary(data_speed$speed_out)
-quantile(data_speed$speed_out, probs = 0.99, na.rm = TRUE)
 
 # Hist turning angle
 hist(data_speed$angle)
 
 # Filter to points with turning angle <90
 turn <- filter(data_speed, angle < 90)
+summary(turn$speed_in, na.rm = TRUE)
 summary(turn$speed_out, na.rm = TRUE)
-quantile(turn$speed_out, probs = 0.99, na.rm = TRUE)
+
+# Plot points with angles - test one bird
+temp <- filter(data_speed, id == "Zeus")
+ggmap(map_z15)+
+  geom_path(data = temp, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = temp, aes(location_long, location_lat, colour = angle))+
+  scale_colour_viridis_c()+
+  theme_void()
+
+# Plot points with speeds - test one bird
+temp <- filter(data_speed, id == "Zeus")
+ggmap(map_z15)+
+  geom_path(data = temp, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = temp, aes(location_long, location_lat, colour = speed_in))+
+  scale_colour_viridis_c()+
+  theme_void()
 ```
 
-We defined biologically realistic movement as speeds < 1.62m/s (from 99th percentile; a note of caution: this shouldn't be used when the birds are undertaking long distance movements as faster speeds may be possible e.g. while gliding on wind) and turning speeds of < 1.25. 
+We defined the biologically realistic maximum speed as 16.6 m/s (60km/h) based on previous work of potential flight speed with wind assistance - also reported for other waders in flight. 
+
+We defined the biologically realistic turning speed as 2m/s for angles greater than 90. 
 
 ```{r}
 # Apply turning angle and speed filtering
 data_sfilt <- data_speed %>%
-  filter(speed_in < 1.62) %>%
-  filter(speed_out < 1.62) %>%
-  filter(!(speed_out > 1.25 & angle <90)) %>%
-  filter(!(speed_in > 1.25 & angle <90))
+  filter(speed_in < 16.6) %>%
+  filter(speed_out < 16.6) %>%
+  filter(!(speed_out > 2 & angle > 90)) %>%
+  filter(!(speed_in > 2 & angle  > 90))
 
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_qfilt)-nrow(data_sfilt)) / nrow(data_qfilt))*100), "%", sep = ""))
+
+# Plot to check
+subset_sfilt <- filter(data_sfilt, id %in% c("Marmalade", "Nutmeg", "Riley", "Zeus"))
+
+ggmap(map_z14)+
+  geom_path(data = subset_qfilt, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = subset_qfilt, aes(location_long, location_lat), colour = "red")+
+  geom_point(data = subset_sfilt, aes(location_long, location_lat), colour = "blue")+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/filtering step 3.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
+
+ggmap(map_z15)+
+  geom_path(data = subset_qfilt, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = subset_qfilt, aes(location_long, location_lat), colour = "red")+
+  geom_point(data = subset_sfilt, aes(location_long, location_lat), colour = "blue")+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/filtering step 3 zoomed.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
 ```
 
-Percentage original data removed: 2%
+Percentage original data removed: 4%
 
 ## 4) Median smoothing
 
@@ -357,7 +448,12 @@ ggmap(map_z15)+
 ggsave("plots/smoothed by id.jpeg", dpi = 500, width = 20, height = 20, units = "cm")
 ```
 
-Looks like the precise end time for Star was not correct on movebank - seems to have the GPS unit moving back to the office after the mortality retrieval. But not an issue since this bird excluded from analyses. 
+## 5) Resampling
+
+Thin data to uniform sampling interval and reduce signal to noise ratio. 
+
+
+
 
 Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data instead.
 
@@ -429,13 +525,6 @@ print(data %>%
 ```
 
 Birds were tracked for a total of 285 days between October 2022 and August 2023 for a total of 3560 tracking days (sum of each bird's tracking duration). 
-
-Wobbles and Star tracked for less than two weeks and excluded from further analyses. 
-
-```{r}
-data <- data %>%
-  filter(!id %in% c("Wobbles", "Star"))
-```
 
 ## Day/night
 
@@ -865,8 +954,7 @@ data <- read.csv("data/data_cleaned.csv") %>%
          time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
                                  tz = "UTC")) %>%
   # Add date
-  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))%>%
-  filter(!id %in% c("Wobbles", "Star"))
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
 
 # set up data in spatial points dataframe
 locs <- SpatialPointsDataFrame(coordinates(
@@ -968,8 +1056,6 @@ data <- read.csv("data/data_cleaned.csv") %>%
                                  tz = "Australia/Melbourne")) %>%
   # Add date
   mutate(date = as_date(time_local, tz = "Australia/Melbourne")) %>%
-  # drop birds excluded from analyses
-  filter(!id %in% c("Wobbles", "Star")) %>%
   # drop NAs
   na.omit()
 
@@ -1051,7 +1137,7 @@ list <-combinations(n = 13, r = 2, v = residents, repeats.allowed = FALSE)
 list1 <- list[,1]
 list2 <- list[,2]
 
-# Calculate interactions between all birds 🐢🐢
+# Calculate interactions between all birds 🐢
 interact <- data.frame()
 
 for(i in 1:length(list1)) {
@@ -1076,7 +1162,7 @@ interact2 <- interact %>%
   mutate(prox = as.numeric(format(round(prox, 4), nsmall = 4)))
 
 # save to disk
-write.csv(interact, "results/proximity_residents.csv", row.names = FALSE)
+write.csv(interact2, "results/proximity_residents.csv", row.names = FALSE)
 
 # summary statistics prox values
 hist(interact2$prox)
@@ -1167,29 +1253,20 @@ prox1 <- read.csv("results/proximity_residents.csv") %>%
 prox1[lower.tri(prox1)] <- t(prox1)[lower.tri(prox1)]
 
 # convert to graph object
-network1 <- graph_from_adjacency_matrix(prox1, mode = "undirected", diag = FALSE, weighted = TRUE)
+g1 <- graph_from_adjacency_matrix(prox1, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+g1
 
 # network density - real edges divided by possible edges
-edge_density(network1)
-
-# network components - are all nodes connected?
-components(network1)
-
-# distance between nodes
-distances(network1, algorithm="unweighted")
-
-# proportion of node's neighbors that are connected to each other
-summary(transitivity(network1, "local"))
+edge_density(g1)
 ```
 
-We have a network of 13 individuals (nodes) and 68 edges with an edge density of 87.1%. The network is continuous (i.e. all nodes in network are connected) and the maximum degree of separation is two. 
-
-First plot with weighted edges and nodes sized by degree centrality (number of edges - how many "friends" they have).
+We have a continuous network of 13 individuals (nodes) and 70 edges with an edge density of 89.7%.
 
 ```{r}
 # set seed to keep layout static
 set.seed(4739)
-layout1 <- create_layout(network1, layout = "fr") 
+layout1 <- create_layout(g1, layout = "fr") 
 
 # plot with tidygraph (wrapper for igraph in tidy API)
 ggraph(layout1)+
@@ -1203,18 +1280,33 @@ ggraph(layout1)+
   theme_void()
 ```
 
-Next calculate community. Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750) Using spinglass because I have a small dense network and these perform well in that use case. 
+Next calculate community. Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750). Walktrap and spinglass had same results: two communities. 
 
 ```{r}
-# community with spinglass
-com <- cluster_spinglass(network1)
-length(com)
-modularity(com)
-membership(com)
+# community with spinglass - weights NULL uses the default weights of the dataset
+com1 <- cluster_spinglass(g1, weights = NULL)
+length(com1)
+modularity(com1)
+membership(com1)
 
 # add community to network layout
-g1 <- layout1 %>%
-  mutate(community = as.factor(membership(com)))
+layout1 <- layout1 %>%
+  mutate(community = as.factor(membership(com1)))
+
+# plot with communities
+ggraph(layout1)+
+  # community polygon
+  geom_mark_hull(aes(x = x, y = y, fill = community), 
+                 colour = "white", alpha = 0.2, expand = unit(0.5, "cm"),
+                 show.legend = FALSE)+
+  # vary edge alpha by weight
+  geom_edge_fan(aes(alpha = weight), show.legend = FALSE) +
+  # node basic
+  geom_node_point(size = 7, shape = 16)+
+  # add labels
+  geom_node_text(aes(label = name), nudge_y = 0.15)+
+  # theme
+  theme_void()
 ```
 
 ### Residents and reinforcers
@@ -1239,36 +1331,37 @@ prox2 <- read.csv("results/proximity_reinforcers.csv") %>%
 prox2[lower.tri(prox2)] <- t(prox2)[lower.tri(prox2)]
 
 # convert to graph object
-network2 <- graph_from_adjacency_matrix(prox2, mode = "undirected", diag = FALSE, weighted = TRUE)
+g2 <- graph_from_adjacency_matrix(prox2, mode = "undirected", diag = FALSE, weighted = TRUE)
+
+g2
 
 # network density - real edges divided by possible edges
-edge_density(network2)
+edge_density(g2)
 
 # network components - are all nodes connected?
-components(network2)
-
-# distance between nodes
-distances(network2, algorithm="unweighted")
-
-# proportion of node's neighbors that are connected to each other
-summary(transitivity(network2, "local"))
+components(g2)
 ```
 
-We have a network of 28 individuals (nodes) and 377 edges with an edge density of 99.7% (only one dyad doesn't have an edge, Sofi & Daisy). The network is continuous (i.e. all nodes in network are connected) and the maximum degree of separation is two. 
+We have a continuous network of 28 individuals (nodes) and 378 edges with an edge density of 100% (no dyads lack a connection). 
 
 ```{r}
 # set seed to keep layout static
-set.seed(1223)
-layout2 <- create_layout(network2, layout = "") 
+set.seed(2222)
+layout2 <- create_layout(g2, layout = "fr") 
 
-# plot with tidygraph (wrapper for igraph in tidy API)
+# add cohort membership to layout
+layout2 <- layout2 %>%
+  rename(id = name) %>%
+  left_join(dplyr::select(metadata, c(id, cohort)))
+
+# plot
 ggraph(layout2)+
   # vary edge alpha by weight
   geom_edge_fan(aes(alpha = weight), show.legend = FALSE) +
-  # node basic
-  geom_node_point(size = 7, shape = 16)+
+  # node shape by cohort
+  geom_node_point(aes(shape = cohort), size = 7)+
   # add labels
-  geom_node_text(aes(label = name), nudge_y = 0.15)+
+  geom_node_text(aes(label = id), nudge_y = 0.15)+
   # theme
   theme_void()
 ```
@@ -1276,15 +1369,31 @@ ggraph(layout2)+
 Calculate community with spinglass method.
 
 ```{r}
-# community with spinglass
-com <- cluster_spinglass(network2)
-length(com)
-modularity(com)
-membership(com)
+# community with spinglass - weights NULL uses the default weights of the dataset
+com2 <- cluster_spinglass(g2, weights = NULL)
+length(com2)
+modularity(com2)
+membership(com2)
 
 # add community to network layout
-g2 <- n2 %>%
-  mutate(community = as.factor(membership(com)))
+layout2 <- layout2 %>%
+  mutate(community = as.factor(membership(com2)))
+
+# plot
+ggraph(layout2)+
+  # community polygon
+  geom_mark_hull(aes(x = x, y = y, fill = community), 
+                 colour = "white", alpha = 0.2, expand = unit(0.5, "cm"),
+                 show.legend = FALSE)+
+  # vary edge alpha by weight
+  geom_edge_fan(aes(alpha = weight), show.legend = FALSE) +
+  # node shape by cohort
+  geom_node_point(aes(shape = cohort), size = 7)+
+  # add labels
+  geom_node_text(aes(label = id), nudge_y = 0.15)+
+  # theme
+  theme_void()
+
 ```
 
 Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was not a member of either group.
