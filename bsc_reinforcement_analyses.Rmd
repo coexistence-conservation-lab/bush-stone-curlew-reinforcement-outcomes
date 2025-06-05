@@ -21,7 +21,6 @@ ggmap::register_stadiamaps(key = readChar("apikey_stadia.txt", nchars = file.inf
 map_z13 <- get_map(c(144.4380, -37.9000), zoom=13, maptype = "satellite")
 map_z14 <- get_map(c(144.4380, -37.9000), zoom=14, maptype = "satellite")
 map_z15 <- get_map(c(144.4380, -37.9000), zoom=15, maptype = "satellite")
-map_z16 <- get_map(c(144.4380, -37.9000), zoom=16, maptype = "satellite")
 ```
 
 # Introduction
@@ -171,7 +170,6 @@ metadata  <- read.csv("data/metadata.csv") %>%
   rename(id = identity)
 ```
 
-
 ## Telemetry
 
 All translocated birds were fitted with a GPS tracker (Ornitrak20 from Ornitela) with a duty cycle of a fix every 60 seconds (or reduced when battery low). Telemetry data were stored on Movebank. We collected data from the release date of each individual until the 12th of January 2024 (when GPS devices were removed from all remaining birds (except one which could not be recaught), ahead of the 3G shutdown).
@@ -186,6 +184,7 @@ High throughput animal tracking data require filtering to remove erroneous point
 2) filtering by quality covariates
 3) filtering biologically unrealistic movement
 4) median smoothing
+5) data thinning
 
 ## 1) Spatiotemporal filtering
 
@@ -338,10 +337,12 @@ for(i in 1:length(birds)){
 # Stats incoming speeds
 hist(data_speed$speed_in)
 summary(data_speed$speed_in)
+quantile(data_speed$speed_in, 0.99)
 
 # Stats outgoing speeds
 hist(data_speed$speed_out)
 summary(data_speed$speed_out)
+quantile(data_speed$speed_out, 0.99)
 
 # Hist turning angle
 hist(data_speed$angle)
@@ -351,37 +352,44 @@ turn <- filter(data_speed, angle < 90)
 summary(turn$speed_in, na.rm = TRUE)
 summary(turn$speed_out, na.rm = TRUE)
 
-# Plot points with angles - test one bird
-temp <- filter(data_speed, id == "Zeus")
+# Plot points with angles and speeds - test one bird
+temp <- filter(data_speed, id == "Nutmeg")
 ggmap(map_z15)+
   geom_path(data = temp, aes(location_long, location_lat), colour = "white")+
   geom_point(data = temp, aes(location_long, location_lat, colour = angle))+
   scale_colour_viridis_c()+
-  theme_void()
-
-# Plot points with speeds - test one bird
-temp <- filter(data_speed, id == "Zeus")
-ggmap(map_z15)+
+  theme_void() 
+ggmap(map_z14)+
   geom_path(data = temp, aes(location_long, location_lat), colour = "white")+
   geom_point(data = temp, aes(location_long, location_lat, colour = speed_in))+
   scale_colour_viridis_c()+
   theme_void()
 ```
 
-We defined the biologically realistic maximum speed as 16.6 m/s (60km/h) based on previous work of potential flight speed with wind assistance - also reported for other waders in flight. 
+We defined the biologically realistic maximum speed of 1.6 m/s (5.7 km/h from 99th percentile).
 
-We defined the biologically realistic turning speed as 2m/s for angles greater than 90. 
+Note: would not use this threshold for birds undertaking long-distance movements, during which they can get much greater speeds (>60km/h or 16m/s) especially when gliding with tail winds. 
+
+We defined the biologically realistic turning speed as 0.5m/s for angles greater than 90.
 
 ```{r}
 # Apply turning angle and speed filtering
 data_sfilt <- data_speed %>%
-  filter(speed_in < 16.6) %>%
-  filter(speed_out < 16.6) %>%
-  filter(!(speed_out > 2 & angle > 90)) %>%
-  filter(!(speed_in > 2 & angle  > 90))
+  filter(speed_in < 1.6) %>%
+  filter(speed_out < 1.6) %>%
+  filter(!(speed_out > 0.5 & angle > 90)) %>%
+  filter(!(speed_in > 0.5 & angle  > 90))
 
 # Filtering effect
 print(paste("Percentage original data removed: ", round(((nrow(data_qfilt)-nrow(data_sfilt)) / nrow(data_qfilt))*100), "%", sep = ""))
+
+# Plot filtered points by speeds - one bird
+temp <- filter(data_sfilt, id == "Zeus")
+ggmap(map_z15)+
+  geom_path(data = temp, aes(location_long, location_lat), colour = "white")+
+  geom_point(data = temp, aes(location_long, location_lat, colour = speed_in))+
+  scale_colour_viridis_c()+
+  theme_void()
 
 # Plot to check
 subset_sfilt <- filter(data_sfilt, id %in% c("Marmalade", "Nutmeg", "Riley", "Zeus"))
@@ -407,7 +415,7 @@ ggmap(map_z15)+
 ggsave("plots/filtering step 3 zoomed.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
 ```
 
-Percentage original data removed: 4%
+Percentage original data removed: 13%
 
 ## 4) Median smoothing
 
@@ -426,41 +434,51 @@ for(i in 1:length(birds)){
   
   data_smooth <- rbind(data_smooth, temp)
 }
-```
 
-Plot outcome to check.
-
-```{r}
-# raw data overlaid with cleaning steps
-ggplot()+
-  geom_scattermore(data=data_lfilt, aes(location_long, location_lat), colour = "red")+
-  geom_scattermore(data=data_qfilt, aes(location_long, location_lat), colour = "yellow")+
-  geom_scattermore(data=data_sfilt, aes(location_long, location_lat), colour = "blue")+
-  theme_void()
-
-# smoothed data only
+# plot to check
 ggmap(map_z15)+
-  geom_path(data=data_sfilt, aes(location_long, location_lat, colour = id), alpha = .7)+
+  geom_path(data=data_smooth, aes(location_long, location_lat, colour = id), alpha = .7)+
   scale_colour_viridis_d()+
   theme_void()+
   facet_wrap(~id)
 
-ggsave("plots/smoothed by id.jpeg", dpi = 500, width = 20, height = 20, units = "cm")
+ggsave("plots/smoothed by id.jpeg", dpi = 300, width = 30, height = 30, units = "cm")
 ```
 
-## 5) Resampling
+## 5) Data thinning
 
-Thin data to uniform sampling interval and reduce signal to noise ratio. 
+Resampling the tracks to a uniform resolution to be equal among the birds (accounting for variation in device success) and to reduce computation intensity for following stages.
 
+What is the current sampling rate per bird?
 
+```{r}
+# summarise sampling rate to decide on temporal interaction threshold
+steps <- data_smooth %>%
+  make_track(.x = location_long, .y = location_lat, .t = datetime, id = id) %>%
+  nest(data = -"id")
 
+sampling_rates <- steps %>%
+  transmute(id, summary = map(data, summarize_sampling_rate)) %>%
+  unnest(summary)
 
-Dropping unneeded columns to reduce the size of the saved file. Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data instead.
+sampling_rates
+```
+
+The highest sampling rates are 11 minutes for Timber and Marmalade, the overall average 6 minutes. Subsampling to 10 minutes.
+
+```{r}
+data_thin <- steps %>%
+  mutate(resampled = map(data, ~ track_resample(.x, rate = minutes(10), tolerance = minutes(2)))) %>%
+  select(id, resampled) %>%
+  unnest(resampled)
+```
+
+Originally I kept the utm easting and northing columns from movebank but I noticed a mismatch between the cleaned lat/lon and the utm, so have elected to transform the data instead. Plus they were dropped in the amt steps.
 
 ```{r}
 # Convert data to spatial and reproject in utm
-points <- data_smooth %>%
-  vect(geom = c("location_long", "location_lat"), crs = "EPSG:4326") %>%
+points <- data_thin %>%
+  vect(geom = c("x_", "y_"), crs = "EPSG:4326") %>%
   # re-project into zone 55S
   project("EPSG:32755") %>%
   st_as_sf()
@@ -469,21 +487,27 @@ points <- data_smooth %>%
 coords <- st_coordinates(points$geometry)
 
 # format data frame for saving to disk
-data <- data_smooth %>%
-  # select columns to keep
-  dplyr::select(c("id", "datetime", "timestamp", "location_long", "location_lat", "acceleration_raw_x", "acceleration_raw_y", "acceleration_raw_z", "external_temperature")) %>%
+data <- data_thin %>%
+  # drop burst column
+  dplyr::select(!burst_) %>%
   # rename columns
-  rename(longitude = location_long,
-         latitude = location_lat,
-         time_local = datetime,
-         time_utc = timestamp) %>%
+  rename(longitude = x_,
+         latitude = y_,
+         time_local = t_) %>%
   # add utm xy columns 
-  mutate(easting = st_coordinates(points$geometry)[,1],
-         northing = st_coordinates(points$geometry)[,2]) %>%
-  # add cohort metadata
-  left_join(dplyr::select(metadata, c("id","cohort")))
+  mutate(x = st_coordinates(points$geometry)[,1],
+         y = st_coordinates(points$geometry)[,2])
 
-# save to disk
+# plot to check
+ggmap(map_z15)+
+  geom_path(data=data, aes(longitude, latitude, colour = id), alpha = .7)+
+  scale_colour_viridis_d()+
+  theme_void()+
+  facet_wrap(~id)
+
+ggsave("plots/smoothed thinned by id.jpeg", dpi = 300, width = 30, height = 30, units = "cm")
+
+# save cleaned data
 write.csv(data, "data/data_cleaned.csv", row.names = FALSE)
 ```
 
@@ -500,9 +524,7 @@ I run these for all the dates to make it simpler (one dataframe instead of multi
 data <- read.csv("data/data_cleaned.csv") %>%
   # Time in posix format
   mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "Australia/Melbourne"),
-         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "UTC")) %>%
+                                 tz = "Australia/Melbourne")) %>%
   # Add date
   mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
 ```
@@ -524,7 +546,7 @@ print(data %>%
   summarise(birddays = sum(days)))
 ```
 
-Birds were tracked for a total of 285 days between October 2022 and August 2023 for a total of 3560 tracking days (sum of each bird's tracking duration). 
+Birds were tracked for a total of 285 days between October 2022 and August 2023 for a total of 3541 tracking days (sum of each bird's tracking duration). 
 
 ## Day/night
 
@@ -547,7 +569,7 @@ data_sun <- left_join(data, suntime) %>%
 
 # Plot to check - using scattermore to speed up display
 ggplot(data_sun)+
-  geom_scattermore(aes(easting, northing, colour = tod), alpha = 0.6)+
+  geom_scattermore(aes(x, y, colour = tod), alpha = 0.6)+
   coord_sf()+
   theme_void()
 
@@ -574,11 +596,11 @@ write.csv(data_night, "data/data_clean_night.csv", row.names = FALSE)
 
 ## Distance moved
 
-How long does it take birds to settle? 
+Distance moved is a metric for establishment, where we predict a short-term increase in distance moved immediately post-release as animals become familiar with their new environment, followed by a decrease as they learn to use the resources. This follows the theoretical predictions of exploration and exploitation hypothesis. 
+
+Distance moved is also a proxy for effort, where travelling further to find resources (e.g. food, water) is more costly than travelling less far. Birds with better foraging skills may not have to travel as far to acquire as many resources. Likewise, birds with a good choice of diurnal roost close to nocturnal resources do not have to commute as far. 
 
 Distance moved per night over time. Calculation is done per bird per day (bird date).
-
-Test with one bird, "Fauna". 
 
 ```{r}
 # read in night data
@@ -586,31 +608,6 @@ data_night <- read.csv("data/data_clean_night.csv") %>%
   # format time as posixct
   mutate(time_local = as.POSIXct(time_local))
 
-# format as amt and calculate step lengths
-steps <- data_night %>%
-  filter(id=="Fauna") %>%
-  # format as amt track - add columns as needed
-  make_track(.x = easting, .y = northing, .t = time_local, id = id, date_bird = date_bird) %>%
-  steps(keep_cols = "start")
-
-# summarise per bird date
-summary <- steps %>%
-  group_by(date_bird) %>%
-  summarise(daily_dist = sum(sl_))
-
-# plot histogram
-hist(summary$daily_dist)
-
-# plot over time
-ggplot(summary, aes(date_bird, daily_dist))+
-  geom_point()+
-  geom_smooth(method = "lm")+
-  theme_void()
-```
-
-Apply to all birds.
-
-```{r}
 # for loop to calculate distance moved per bird date
 birds <- unique(data_night$id)
 
@@ -635,7 +632,7 @@ for(i in 1:length(birds)){
     mutate(easting = st_coordinates(points$geometry)[,1],
          northing = st_coordinates(points$geometry)[,2]) %>%
     # format as amt track 
-    make_track(.x = easting, .y = northing, .t = time_local, id = id, 
+    make_track(.x = x, .y = y, .t = time_local, id = id, 
                # add additional columns as needed
                date_bird = date_bird) %>%
     steps(keep_cols = "start")
@@ -675,48 +672,22 @@ ggplot(distance_daily)+
   xlab("Distance moved daily (m)") + 
   theme(axis.title.y=element_blank())
 
-ggsave("plots/distance by id.jpeg", dpi = 500, width = 10, height = 15, units = "cm")
+ggsave("plots/distance by id.jpeg", dpi = 200, width = 10, height = 15, units = "cm")
 ```
 
 ## Roost establishment
 
-Look at the same idea as the previous section (a metric of establishment) but with diurnal roost movement rather than nightly distanced moved. 
+The establishment of diurnal roosts is an important step for translocated bush stone-curlews to develop wild skills post-release. The distance between consecutive roosts is a good proxy for their establishment, where decreasing distance between roosts indicates they are roosting in a similar area and therefore establishing a pattern of movement- finding and then exploiting suitable resources. 
 
-First calculate roost locations. Test with one bird.
+Calculate diurnal roost locations.
 
 ```{r}
 # read in day data
 data_day <- read.csv("data/data_clean_day.csv")
 
-# filter to test bird
-test <- data_day %>%
-  filter(id == "Aurora")
-
-# plot roosts coloured by date
-ggmap(map_z15)+
-  geom_density2d(data=test, aes(longitude, latitude, colour = date), inherit.aes = FALSE)+
-  theme_void()+
-  scale_colour_viridis_d()+
-  theme(legend.position = "none")
-
-# plot a series of dates to see if multiple roosts occur
-dates <- seq(as.Date("2023-01-01"), as.Date("2023-01-12"), "days")
-span <- filter(test, date %in% dates)
-
-ggmap(map_z15)+
-  geom_density2d(data=test, aes(longitude, latitude), colour = "yellow", inherit.aes = FALSE)+
-  theme_void()+
-  facet_wrap(~date)
-```
-
-On visual inspection, the vast majority of dates have a single roost. 
-
-Approximate roosts positions using kmeans. Apply to all birds
-
-```{r}
 # locate kmeans center for a roost per bird per day
 birds <- unique(data_day$id)
-days <- unique(data_day$date)
+days <- unique(data_day$date_bird)
 
 roosts <- data.frame()
 
@@ -725,9 +696,9 @@ for (i in 1:length(birds)){
     
     #subset by bird and date
     subset <- subset(data_day, id == birds[i] & date == days[j],
-                     c(easting, northing))
+                     c(x, y))
     # skip days where not enough points
-      if (length(subset$easting)<4){next}
+      if (length(subset$x)<4){next}
     
     # find kmean centers
     kmean <- kmeans(subset, centers=1)
@@ -748,16 +719,16 @@ summary(roosts$npoints)
 
 # plot roosts by number of points
 ggplot(roosts)+
-  geom_point(aes(easting, northing, size = npoints, colour = id))+
-  geom_path(aes(easting, northing, group = id), alpha = 0.3)+
+  geom_point(aes(x, y, size = npoints, colour = id))+
+  geom_path(aes(x, y, group = id), alpha = 0.3)+
   coord_sf()+
   scale_colour_viridis_d()+
   theme_bw()
 
 # plot for a single bird with date as colour
 ggplot(data = filter(roosts, id == "Marmalade"))+
-  geom_point(aes(easting, northing, size = npoints, colour = as.Date(date)))+
-  geom_path(aes(easting, northing, group = id), alpha = 0.3)+
+  geom_point(aes(x, y, size = npoints, colour = as.Date(date)))+
+  geom_path(aes(x, y, group = id), alpha = 0.3)+
   coord_sf()+
   scale_colour_viridis_c()+
   theme_bw()+
@@ -778,7 +749,7 @@ How far between consecutive roosts?
 # read in roost locations, format as spatial
 roosts <- read.csv("results/daily_roost_location.csv") %>%
   dplyr::select(!"npoints") %>%
-  vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
+  vect(geom = c("x", "y"), crs = "EPSG:32755") %>%
   st_as_sf()
 
 # calculate distance between successive roosts per bird
@@ -823,8 +794,8 @@ distance_roosts_latlon <- distance_roosts %>%
   mutate(date = as_date(date))
 
 # plot roosts with colour as distance from previous
-ggplot()+
-  geom_sf(data = distance_roosts_latlon, aes(colour = distance_previous))+
+ggmap(map_z15)+
+  geom_sf(data = distance_roosts_latlon, aes(colour = distance_previous), inherit.aes = FALSE)+
   scale_colour_viridis_c()+ 
   theme_void()
 
@@ -844,16 +815,14 @@ nutmeg <- read.csv("data/data_cleaned.csv") %>%
   filter(id == "Nutmeg") %>%
   # Time in posix format
   mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "Australia/Melbourne"),
-         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "UTC")) %>%
+                                 tz = "Australia/Melbourne")) %>%
   # Add date
-  mutate(date = as_date(time_local, tz = "Australia/Melbourne")) 
+  mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
 
 # Plot
 ggmap(map_z13)+
   geom_point(data=nutmeg, aes(longitude, latitude, colour = date), alpha = 0.8)+
-  scale_colour_viridis_c()+
+  scale_colour_viridis_c(trans = "date")+
   geom_path(data=nutmeg, aes(longitude, latitude), colour = "white", alpha = 0.4)+
   theme_void()
 ```
@@ -878,7 +847,7 @@ ggmap(map_z15)+
   theme_void()
 ```
 
-One real roost outside (Nutmeg's adventure as above) and 5 where birds were just roosting close to the fence. This is fine. 
+One real roost outside (Nutmeg's adventure as above) and a handful where birds were just roosting close to the fence. This is fine. 
 
 Save output.
 
@@ -895,7 +864,7 @@ write.csv(distance_roosts2, "results/daily_distance_between_roosts.csv", row.nam
 
 ## Release site fidelity
 
-How far did they move from the release location? Based on daily roost distance from release location.
+How far did they move from the release location? Based on daily roost distance from release location. Release site fidelity is a metric for translocation success. 
 
 Calculate distance from daily roost to release location. 
 
@@ -950,15 +919,13 @@ Home range change is another way to investigate post-release behavioural modific
 data <- read.csv("data/data_cleaned.csv") %>%
   # Time in posix format
   mutate(time_local = as.POSIXct(time_local, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "Australia/Melbourne"),
-         time_utc = as.POSIXct(time_utc, format = "%Y-%m-%d %H:%M:%OS", 
-                                 tz = "UTC")) %>%
+                                 tz = "Australia/Melbourne")) %>%
   # Add date
   mutate(date = as_date(time_local, tz = "Australia/Melbourne"))
 
 # set up data in spatial points dataframe
 locs <- SpatialPointsDataFrame(coordinates(
-  cbind(data$easting, data$northing)), data = data)
+  cbind(data$x, data$y)), data = data)
 
 # home range polygon per bird per day 🐢 40 minutes
 birds <- as.character(unique(data$id))
@@ -1014,18 +981,14 @@ hr50_daily_ll <- st_transform(hr50_daily, "EPSG:4326")
 # plot home range map
 ggmap(map_z15)+
   geom_sf(data = hr90_daily_ll, aes(fill = id), alpha = 0.2, inherit.aes = FALSE)+
-  scale_colour_viridis_d()+
-  theme_void()
+  theme_void()+
+  facet_wrap(~id)
 
 # plot core range map
 ggmap(map_z15)+
   geom_sf(data = hr50_daily_ll, aes(fill = id), alpha = 0.2, inherit.aes = FALSE)+
-  scale_colour_viridis_d()+
-  theme_void()
-
-# save  shapefiles
-st_write(hr90_daily_ll, "shapefiles/hr_90.shp")
-st_write(hr50_daily_ll, "shapefiles/hr_50.shp", append = FALSE)
+  theme_void()+
+  facet_wrap(~id)
 
 # extract area per day i.e. drop geometry
 hr_area <- st_drop_geometry(hr90_daily) %>%
@@ -1046,7 +1009,7 @@ The key issue addressed in this paper is whether social interaction occurs betwe
 
 First we need to determine interactions. Using GPS tracking data we cannot perfectly capture social interactions, but we can approximate these with proximity (distance and time) analysis. I elected to use the coefficient of association because it produces few few I errors, owing to its simplicity ([Long et al 2014](https://besjournals.onlinelibrary.wiley.com/doi/10.1111/1365-2656.12198)) 
 
-To determine the temporal interaction threshold we use the mean sampling rate.
+To determine the temporal interaction threshold we use half the mean sampling rate.
 
 ```{r}
 # Read in cleaned data 
@@ -1056,12 +1019,12 @@ data <- read.csv("data/data_cleaned.csv") %>%
                                  tz = "Australia/Melbourne")) %>%
   # Add date
   mutate(date = as_date(time_local, tz = "Australia/Melbourne")) %>%
-  # drop NAs
+  # needed to omit NAs for wildlifeDI to work
   na.omit()
 
 # summarise sampling rate to decide on temporal interaction threshold
 steps <- data %>%
-  make_track(.x = easting, .y = northing, .t = time_local, id = id) %>%
+  make_track(.x = x, .y = y, .t = time_local, id = id) %>%
   nest(data = -"id")
 
 sampling_rates <- steps %>%
@@ -1069,25 +1032,22 @@ sampling_rates <- steps %>%
   unnest(summary)
 
 mean(sampling_rates$mean)
-mean(sampling_rates$sd)
 ```
 
-The mean sampling rate for the cleaned data is 6 minutes. We will use a time parameter of 3 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
+The mean sampling rate for the cleaned data is 11 minutes. We will use a time parameter of 5.5 minutes (half the sampling interval) following advice from the wildlifeDI package vignette. 
 
 First format tracks as move2 objects for use in wildlifeDI.
 
 ```{r}
 # format track data as move2 object
-move <- mt_as_move2(data, coords = c("easting", "northing"), time_column = "time_local", track_id_column = "id") %>%
+move <- mt_as_move2(data, coords = c("x", "y"), time_column = "time_local", track_id_column = "id") %>%
   # add crs
-  sf::st_set_crs("EPSG:32755") %>%
-  # needed to omit NAs for wildlifeDI to work
-  na.omit()
+  sf::st_set_crs("EPSG:32755") 
 ```
 
 We use a dcPlot of paired encounters across distance to approximate the distance threshold (using a subset to reduce processing time).
 
-Our practitioner guesstimate was a threshold of 30m (based on visual observation of interactions between individuals in the field during monitoring). 
+Our practitioner guesstimate was a threshold of 20m (based on visual observation of interactions between individuals in the field during monitoring). 
 
 ```{r}
 # one week subset
@@ -1095,11 +1055,10 @@ temp <- seq.Date(from = as_date("2023-06-01"), to = as_date("2023-06-07"), by = 
 move_subset <- filter(move, date %in% temp)
 
 # plot distribution of paired fixes by distance
-dcPlot(move_subset,tc=3*60,dmax=500)
-dcPlot(move_subset,tc=3*60,dmax=100)
+dcPlot(move_subset,tc=5.5*60,dmax=100)
 ```
 
-The majority of contacts took place <40m apart. I'll retain the guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty of approx 20m (on cleaned data).
+The majority of contacts took place <40m apart. I'll retain the guesstimate of 30m as the parameter. This is also within tolerance for the approximate GPS uncertainty.
 
 We calculate prox for all dyads for the two time periods of interest:
 
@@ -1123,10 +1082,10 @@ dyad <- filter(data_resident, id %in% c("Aurora", "Briar"))
 
 checkTO(dyad)
 Sys.time()
-test <- Ca(dyad, tc=4*60, dc=30);Sys.time()
+test <- Prox(dyad, tc=5.5*60, dc=30);Sys.time()
 ```
 
-The test dyad took 1:49 so I'm anticipating the full set of 78 interactions will take 2.3 hours. 
+The test dyad took 34 seconds so I'm anticipating the full set of 78 interactions will take 45 minutes.
 
 ```{r}
 # list of residents
@@ -1137,7 +1096,7 @@ list <-combinations(n = 13, r = 2, v = residents, repeats.allowed = FALSE)
 list1 <- list[,1]
 list2 <- list[,2]
 
-# Calculate interactions between all birds 🐢
+# Calculate interactions between all birds 🐢 
 interact <- data.frame()
 
 for(i in 1:length(list1)) {
@@ -1145,7 +1104,7 @@ for(i in 1:length(list1)) {
   dyad <- filter(data_resident, id %in% c(list1[i], list2[i]))
   
   temp <- tryCatch({
-    data.frame(Prox(dyad, tc=4*60, dc=30)) %>%
+    data.frame(Prox(dyad, tc=5.5*60, dc=30)) %>%
       clean_names()
   }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
   
@@ -1169,11 +1128,11 @@ hist(interact2$prox)
 summary(interact2$prox)
 ```
 
-Mean proximity score is 13%, min is no interaction and max is 70%. 
+Mean proximity score is 13%, min is no interaction and max is 69%. 
 
 ### Residents and reinforcers
 
-We define this as the period from the last reinforcer released (2023-06-11) to the end of the study period (when reinforcers moved to Orana 2023-08-05). Each dyad takes approx. 8 seconds so all 378 takes approx 1 hour to run. 
+We define this as the period from the last reinforcer released (2023-06-11) to the end of the study period (when some of the reinforcers were moved to Orana on 2023-08-05).
 
 ```{r}
 # define reinforcer date period
@@ -1183,6 +1142,17 @@ rein_dates <- seq.Date(from = as_date("2023-06-11"), to = as_date("2023-08-05"),
 data_reinforce <- move %>%
   filter(date %in% rein_dates)
 
+# Test for a single dyad
+dyad <- filter(data_reinforce, id %in% c("Athena", "Zeus"))
+
+checkTO(dyad)
+Sys.time()
+test <- Prox(dyad, tc=5.5*60, dc=30);Sys.time()
+```
+
+The test dyad took 11 seconds so I'm anticipating the full set of 378 interactions will take 1 hour to run. 
+
+```{r}
 # list of founders
 founders <- unique(data_reinforce$id)
 
@@ -1191,7 +1161,7 @@ list <-combinations(n = 28, r = 2, v = founders, repeats.allowed = FALSE)
 list1 <- list[,1]
 list2 <- list[,2]
 
-# Calculate interactions between all birds 🐢🐢
+# Calculate interactions between all birds 🐢
 interact <- data.frame()
 
 for(i in 1:length(list1)) {
@@ -1199,7 +1169,7 @@ for(i in 1:length(list1)) {
   dyad <- filter(data_reinforce, id %in% c(list1[i], list2[i]))
   
   temp <- tryCatch({
-    data.frame(Prox(dyad, tc=4*60, dc=30)) %>%
+    data.frame(Prox(dyad, tc=5.5*60, dc=30)) %>%
       clean_names()
   }, error = function(e) data.frame(ca = NA, bird1 = NA, bird2 = NA)) 
   
@@ -1223,7 +1193,7 @@ hist(interact2$prox)
 summary(interact2$prox)
 ```
 
-Mean proximity score is 11%, min is <1% and max is 37%. 
+Mean proximity score is 10.4%, min is <1% and max is 33%. 
 
 ## Social network
 
@@ -1261,11 +1231,11 @@ g1
 edge_density(g1)
 ```
 
-We have a continuous network of 13 individuals (nodes) and 70 edges with an edge density of 89.7%.
+We have a continuous network of 13 individuals (nodes) and 69 edges with an edge density of 87.2%.
 
 ```{r}
 # set seed to keep layout static
-set.seed(4739)
+set.seed(1111)
 layout1 <- create_layout(g1, layout = "fr") 
 
 # plot with tidygraph (wrapper for igraph in tidy API)
@@ -1280,7 +1250,7 @@ ggraph(layout1)+
   theme_void()
 ```
 
-Next calculate community. Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750). Walktrap and spinglass had same results: two communities. 
+Next calculate community. Based on the suggestions by [Yang et al. (2016)](https://www.nature.com/articles/srep30750).
 
 ```{r}
 # community with spinglass - weights NULL uses the default weights of the dataset
@@ -1337,9 +1307,6 @@ g2
 
 # network density - real edges divided by possible edges
 edge_density(g2)
-
-# network components - are all nodes connected?
-components(g2)
 ```
 
 We have a continuous network of 28 individuals (nodes) and 378 edges with an edge density of 100% (no dyads lack a connection). 
@@ -1396,7 +1363,7 @@ ggraph(layout2)+
 
 ```
 
-Interesting! The reinforcers split nearly perfectly in half, with nine members in an exclusive social group (consisting only of reinforcers) and eleven members in a mixed social group (along with all the residents). Daisy was not a member of either group.
+Interesting! The reinforcers split nearly perfectly in half, with nine in an exclusive social group (consisting only of reinforcers) and ten in a mixed social group (along with all the residents). Daisy was not a member of either group.
 
 ### SNA figure
 
@@ -1469,7 +1436,6 @@ ggarrange(n1, n2,
 # save
 ggsave("plots/social_network_both.png", dpi = 700, width = 16, height = 19, units = "cm")
 ```
-
 
 # Statistical analysis: reinforcers
 
