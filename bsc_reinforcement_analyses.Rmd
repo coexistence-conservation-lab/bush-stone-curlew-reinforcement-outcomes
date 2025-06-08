@@ -208,7 +208,7 @@ data_raw <- readr::read_csv(fs::dir_ls(path = "movebank")) %>%
   # rename id column
   rename(id = "individual_local_identifier") %>%
   # Remove days after end of study
-  filter(date < "2023-08-05")
+  filter(date <= "2023-08-05")
 
 # convert data to spatial points
 coords <- data_raw %>%
@@ -415,7 +415,7 @@ ggmap(map_z15)+
 ggsave("plots/filtering step 3 zoomed.jpeg", dpi = 200, width = 20, height = 20, units = "cm")
 ```
 
-Percentage original data removed: 13%
+Percentage original data removed: 10%
 
 ## 4) Median smoothing
 
@@ -464,7 +464,7 @@ sampling_rates <- steps %>%
 sampling_rates
 ```
 
-The highest sampling rates are 11 minutes for Timber and Marmalade, the overall average 6 minutes. Subsampling to 10 minutes.
+The highest sampling rates are 11 minutes for Timber and Marmalade, the overall average 6 minutes. Subsampling to 10 minutes with a tolerance of 2 minutes.
 
 ```{r}
 data_thin <- steps %>%
@@ -546,7 +546,7 @@ print(data %>%
   summarise(birddays = sum(days)))
 ```
 
-Birds were tracked for a total of 285 days between October 2022 and August 2023 for a total of 3541 tracking days (sum of each bird's tracking duration). 
+Birds were tracked for a total of 286 days between October 2022 and August 2023 for a total of 3567 tracking days (sum of each bird's tracking duration). 
 
 ## Day/night
 
@@ -747,8 +747,7 @@ How far between consecutive roosts?
 
 ```{r}
 # read in roost locations, format as spatial
-roosts <- read.csv("results/daily_roost_location.csv") %>%
-  dplyr::select(!"npoints") %>%
+roosts <- roosts %>%
   vect(geom = c("x", "y"), crs = "EPSG:32755") %>%
   st_as_sf()
 
@@ -853,7 +852,7 @@ Save output.
 
 ```{r}
 # convert geometry to regular columns to save to disk
-distance_roosts2 <- distance_roosts_latlon %>%
+distance_roosts2 <- distance_roosts %>%
   st_drop_geometry() %>%
   mutate(longitude = st_coordinates(distance_roosts_latlon$geometry)[,1],
          latitude = st_coordinates(distance_roosts_latlon$geometry)[,2])
@@ -873,9 +872,9 @@ Release location lat/lon:(-37.902374, 144.434323)
 
 ```{r}
 # read in roost locations, format as spatial
-roosts <- read.csv("data/daily_roost_location.csv") %>%
+roosts <- read.csv("results/daily_roost_location.csv") %>%
   dplyr::select(!"npoints") %>%
-  vect(geom = c("easting", "northing"), crs = "EPSG:32755") %>%
+  vect(geom = c("x", "y"), crs = "EPSG:32755") %>%
   st_as_sf()
 
 # release coords as spatial
@@ -1426,7 +1425,7 @@ Instead of using dyad connections, we can use the social groups (which are seren
 
 We hypothesised members of the mixed resident-reinforcer social group would proceed more quickly through the PRBM phases than those in the reinforcer only group. I also want to compare both reinforcer groups to the residents to see if one is more similar than the other. Excluding Daisy who was not a member of either group.
 
-Dates are from the last reinforcer released to the day before the first reinforcer translocated to the secondary site (otherwise includes dates where disturbance took place).
+Dates are from the last reinforcer released to the 3rd August 2023, because on the 4th we commenced fieldwork for the translocation to Orana and so the birds were disturbed by the intervention. 
 
 ```{r}
 # social group membership
@@ -1498,9 +1497,6 @@ check_model(best1)
 # summary
 summary(best1)
 
-# post-hoc comparison of slopes
-emtrends(best1, pairwise ~ social, var = "elapsed")
-
 # plot effects
 plot_model(best1)
 
@@ -1519,16 +1515,12 @@ ggplot(pred1, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)
 ```
 
 **Results:**
-The best fitting model included social group and time (linear and quadratic), the interaction between these, and individual as a random effect.
+Distance moved per day increased with time post-release. Both reinforcer groups had significant negative linear and quadratic responses over time compared to residents, meaning the increase of distance over time decelerated and declined for these groups
 
-Distance moved per day increased with time post-release (estimate: 277.75 ± 41.19 SE, p < 0.001). Both reinforcer groups had significant negative quadratic responses over time compared to residents, meaning the increase of distance over time decelerated. 
-
-The exclusive reinforcer group had a significantly lower slope of movement increase over time compared to the residents (p = 0.0143) and weakly lower compared to the mixed reinforcers (p=0.0459). 
+The exclusive reinforcer group had a significantly lower slope of movement increase over time compared to the residents and mixed reinforcers.
 
 **Interpretation:**
-Reinforcers increase over time in response to the need to explore (find resources etc.) then stabilising - evidence of establishment. 
-
-Also increase in movement may align with theoretical increase in fitness and physical capability with increased time out of captivity.
+Reinforcers increase over time in response to the need to explore (find resources etc.) then stabilising - evidence of establishment. Also increase in movement may align with theoretical increase in fitness and physical capability with increased time out of captivity. Mixed reinforcers were more similar to the residents than the exclusive reinforcers.
 
 Movement by the residents might be influenced by factors unrelated to settlement. 
 
@@ -1589,7 +1581,7 @@ m2 <- glmmTMB(log1p(distance_previous) ~ social * (scale(elapsed) + I(scale(elap
 dm2 <- dredge(m2, fixed = "cond(social)")
 
 # parsimonious model where delta <2 and fewest predictors 
-# in this case only one model (the top ranked) delta AICc < 2
+# in this case only two had delta <2 but top ranked was fewest
 best2 <- get.models(dm2, delta <2)[[1]]
 
 # check model
@@ -1597,6 +1589,9 @@ check_model(best2)
 
 # summary
 summary(best2)
+
+# post-hoc comparison of slopes
+emtrends(best2, pairwise ~ social, var = "elapsed")
 
 # plot effects
 plot_model(best2)
@@ -1616,11 +1611,7 @@ ggplot(pred2, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)
 ```
 
 **Results:**
-The best fitting model included social group, time (linear and quadratic), the interaction between these (only quadratic) and individual as a random effect. 
-
-Roost displacement generally decreased over time (estimate: -0.101 ± 0.032, p = 0.0014). However, this effect was mediated by social group, where exclusive reinforcers moved significantly further than residents (estimate: 0.71 ± 0.13, p < 0.001) and had a significant quadratic interaction (estimate: -0.21496 ± 0.09176, p = 0.01915) such that they initially increased before reaching a peak and declining. 
-
-The mixed reinforcers were not significantly different from residents. 
+Roost displacement generally decreased over time. However, this effect was mediated by social group, where exclusive reinforcers moved significantly further than residents and had a significant quadratic interaction such that they initially increased before reaching a peak and declining. The mixed reinforcers were only weakly different from residents. 
 
 **Interpretation:**
 Distance between consecutive roosts is a metric for home range establishment in space. Shorter distances between consecutive roosts indicate an individual is staying within a patch and building up familiarity in the roost locations; whereas large distances between consecutive roosts indicate continued searching or lack of stability.
@@ -1695,9 +1686,6 @@ check_model(best3)
 # summary
 summary(best3)
 
-# post-hoc comparison of means
-emmeans(best3, pairwise ~ social, type = "response")
-
 # post-hoc comparison of slopes
 emtrends(best3, pairwise ~ social, var = "elapsed")
 
@@ -1721,9 +1709,9 @@ ggplot(pred3, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high)
 **Results:**
 The best fitting model included social group and time (linear and quadratic), the interaction between these, and individual as a random effect.
 
-Distance from the release site significantly increased over time (estimate: 0.6600 ± 0.1704, p = 0.0001) and had a positive quadratic effect, indicating an acceleration of this increase (estimate: 1.2086 ± 0.1883, p < 0.0001). Mixed reinforcers did not differ from residents in the rate of increase. 
+Distance from the release site significantly increased over time and had a positive quadratic effect, indicating an acceleration of this increase.
 
-Exclusive reinforcers moved significantly further from the release site than both mixed reinforcers and residents (p < 0.0001). Exclusive reinforcers exhibit a marked deceleration compared to the other groups.
+Exclusive reinforcers moved significantly further from the release site than both mixed reinforcers and residents (p < 0.0001).
 
 **Interpretation:**
 Mixed reinforcers had greater release site fidelity than exclusive reinforcers. Tactically, site fidelity is importancde because, first, hyperdispersal increases chance of predation, and second, the release area has suitable resources for long-term survival and recruitment. 
@@ -1771,7 +1759,7 @@ ggmap(map_z15)+
                  strip.text = element_text(size = 11))
 
 # save
-ggsave("maps/roost_location_social_groups.png", dpi = 800, bg = 'white')
+ggsave("maps/roost_location_social_groups.png", dpi = 300, bg = 'white')
 ```
 
 ### m4: Home range size
@@ -1829,7 +1817,7 @@ hist(log1p(datam4$kud50))
 ggqqplot(log1p(datam4$kud50))
 
 # test difference between the groups with interaction of time as a quadratic
-m4 <- glmmTMB(log1p(kud50) ~ social * (scale(elapsed) + I(scale(elapsed)^2))+ (1|id), 
+m4 <- glmmTMB(log1p(kud50) ~ social * (scale(elapsed) + I(scale(elapsed)^2)) + (1|id), 
               data = datam4,
               na.action = "na.fail")
 
@@ -1845,9 +1833,6 @@ check_model(best4)
 
 # summary
 summary(best4)
-
-# post-hoc comparison of means
-emmeans(best4, pairwise ~ social, type = "response")
 
 # post-hoc comparison of slopes
 emtrends(best4, pairwise ~ social, var = "elapsed")
@@ -1925,84 +1910,48 @@ ggplot(datam5)+
   geom_boxplot(aes(social, weight))+
   theme_minimal()+
   facet_wrap(~status)
+
+# calculate difference
+sum5 <- datam5 %>%
+  group_by(status, social) %>%
+  summarise(weight = mean(weight)) %>%
+  pivot_wider(names_from = status, values_from = weight) %>%
+  clean_names() %>%
+  mutate(diff = pre_release - post_release,
+         percent = diff / pre_release)
+
+sum5
 ```
 
 We have pre and post data for 17 of the 20 reinforcers. All lost weight. The mixed social group started out on average lower than the exclusive group.
 
-Next I calculated the change in weight both in grams and as a proportion of starting weight (to account for variation in body sizes).
-
 ```{r}
-# calculate weight change in grams and as a proportion of starting weight
-sum5 <- datam5 %>%
-  pivot_wider(names_from = status, values_from = weight) %>%
-  clean_names() %>%
-  drop_na() %>%
-  # add change columns
-  mutate(diff = pre_release - post_release,
-         proportion = diff/pre_release) %>%
-  # format social group as factor
-  mutate(social = as_factor(social))
-
-# plot total weight differences by social group
-ggplot(sum5)+
-  geom_boxplot(aes(social, diff))+
-  theme_minimal()
-
-# plot proportional weight differences by social group
-ggplot(sum5)+
-  geom_boxplot(aes(social, proportion))+
-  theme_minimal()
-```
-
-Although total weight change seems on average lower in the mixed group, proportionally it does not look like a lot of difference.
-
-```{r}
-# check distribution of the difference
-hist(sum5$diff)
-ggqqplot(sum5$diff)
-
 # test whether weight change differs between the social groups
-# as total difference
-m5a <- glmmTMB(diff ~ social, data = sum5)
-summary(m5a)
-# and as a proportion of starting weight
-m5b <- glmmTMB(proportion ~ social, data = sum5)
-summary(m5b)
-
-# predictions
-pred5b <- predict_response(m5b, terms = c("social"))
-
-# plot predictions
-ggplot(pred5b, aes(x, predicted, colour = x))+
-  geom_pointrange(aes(ymin = conf.low, ymax = conf.high))+
-  xlab("Social group membership") + 
-  ylab("Predicted values of proportion starting weight lost")+
-  theme_classic()+
-  scale_y_continuous(limits = c(0, 0.3))
-```
-
-There is no significant differences between groups for weight loss.
-
-I want to model predicted effects of overall weight change so I can model a geom_line of pre and post translocation (I think the geom_pointrange looks boring).
-
-```{r}
-# weight change over time between social groups
-m5 <- glmmTMB(weight ~ social * status, data = datam5)
+m5 <- glmmTMB(weight ~ social * status + (1|id),
+               data = datam5)
 summary(m5)
 
 # predictions
-pred5 <- predict_response(m5, terms = c("status", "social"))
+pred5 <- predict_response(m5, terms = c("social", "status"))
 
-# plot predictions
-ggplot(pred5, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf.high, group = group)) +
-  geom_line(aes(colour = group))+
+# plot predictions - point range
+ggplot(pred5, aes(x, predicted, colour = x))+
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high))+
+  xlab("Social group membership") + 
+  ylab("Predicted values of weight (g)")+
+  facet_wrap(~group)+
+  theme_classic()
+
+# plot predictions- trends
+ggplot(pred5, aes(group, predicted, fill = x, ymin = conf.low, ymax = conf.high, group = x)) +
+  geom_line(aes(colour = x))+
   geom_ribbon(alpha = 0.2)+
   xlab(element_blank())+ 
   ylab("Predicted weight (g)") +
   theme_minimal()
 ```
 
-Significant effect of status (pre and post release) No difference between groups.
+While the exclusive group lost 20.55g more this effect wasn't significant, but perhaps still biologically relevant. Both groups lost on average 119.45g.
 
 ## Figure: reinforcer stats
 
@@ -2047,9 +1996,8 @@ g4 <- ggplot(pred4, aes(x, predicted, fill = group, ymin = conf.low, ymax = conf
   ylab("Home range area (ha)")+
   theme()
 
-g5 <- ggplot(pred5, aes(x, predicted, fill = group, 
-                        ymin = conf.low, ymax = conf.high, group = group)) +
-  geom_line(aes(colour = group))+
+g5 <- ggplot(pred5, aes(group, predicted, fill = x, ymin = conf.low, ymax = conf.high, group = x)) +
+  geom_line(aes(colour = x))+
   geom_ribbon(alpha = 0.2)+
   theme_classic()+
   xlab("Time period")+
@@ -2096,6 +2044,8 @@ ms <- mutate(as.data.frame(dm1), model = "distance daily") %>%
 
 write.csv(ms, "results/m1-4_modelselection.csv", row.names = FALSE)
 ```
+
+Note to self: need to open tab_model and resave as xlsx.
 
 # Statistical analysis residents
 
@@ -2767,7 +2717,9 @@ surv_data2 <- surv_data %>%
   # add column for membership to social group
   mutate(social = ifelse(identity %in% club, "exclusive", "mixed")) %>%
   # select only reinforcers
-  filter(cohort == "Reinforcing")
+  filter(cohort == "Reinforcing") %>%
+  # exclude Daisy
+  filter(!identity == "Daisy")
 
 # Fit a survival model by social group
 kmfit_social <- survfit(Surv(time, status) ~ social, data = surv_data2)
