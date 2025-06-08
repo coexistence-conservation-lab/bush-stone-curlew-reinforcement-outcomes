@@ -1591,7 +1591,7 @@ check_model(best2)
 summary(best2)
 
 # post-hoc comparison of slopes
-emtrends(best2, pairwise ~ social, var = "elapsed")
+emtrends(best2, pairwise ~ social)
 
 # plot effects
 plot_model(best2)
@@ -2049,14 +2049,14 @@ Note to self: need to open tab_model and resave as xlsx.
 
 # Statistical analysis residents
 
-We want to know if the residents change their behaviour in response to the reinforcing release. To test this we compare their movement metrics before and after the reinforcement for the same period i.e. 60 days either side. Unlike the reinforcer dates, we are measuring post-release from the *first* reinforcer released, rather than the last - because these 3 days still have potential to impact the residents. 
+We want to know if the residents change their behaviour in response to the reinforcing release. To test this we compare their movement metrics before and after the reinforcement for the same period i.e. 58 days either side. Unlike the reinforcer dates, we are measuring post-release from the *first* reinforcer released, rather than the last - because these 3 days still have potential to impact the residents. 
 
 ```{r}
 # define pre-release date period
-pre_dates <- seq.Date(from = as_date("2023-04-08"), to = as_date("2023-06-06"), by = "day")
+pre_dates <- seq.Date(from = as_date("2023-04-11"), to = as_date("2023-06-07"), by = "day")
 
 # define post-release date period
-post_dates <- seq.Date(from = as_date("2023-06-07"), to = as_date("2023-08-05"), by = "day")
+post_dates <- seq.Date(from = as_date("2023-06-07"), to = as_date("2023-08-03"), by = "day")
 
 # all dates
 dates <- c(pre_dates, post_dates)
@@ -2076,7 +2076,7 @@ datam6 <- read.csv("results/daily_distance_moved.csv") %>%
   # format dates as numeric
   mutate(date = as_date(date_bird)) %>%
   # limit to reinforcement period
-  filter(date %in% dates) %>%
+  filter(date_bird %in% dates) %>%
   # add column for pre or post release
   mutate(period = factor(ifelse(date %in% pre_dates, 
                          "pre-reinforcement", "post-reinforcement"),
@@ -2112,7 +2112,6 @@ m6 <- glmmTMB(daily_dist ~ period * (scale(as.numeric(date)) + I(scale(as.numeri
 
 # model selection
 dm6 <- dredge(m6)
-dm6
 
 # parsimonious model where delta <2 and fewest predictors 
 # in this case only one model (top ranked) had delta AICc <2
@@ -2174,11 +2173,7 @@ ggplot(pred6, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor.
-
-Residents moved significantly less distance post reinforcement and the trend was different. 
-
-On average, residents moved 829m less in the post-reinforcement period (p < 0.001). The interaction of time and period was significant p < 0.001). 
+Residents moved less distance post reinforcement and the trend was different. 
 
 **Interpretation:**
 The residents changed their distance moved, perhaps to accommodate the reinforcers who could not immediately move as far. They slowly increased their distance moved to pre-reinforcement levels. 
@@ -2237,14 +2232,15 @@ m7 <- glmmTMB(log1p(distance_previous) ~ period * (scale(as.numeric(date)) + I(s
 
 # model selection
 dm7 <- dredge(m7)
-dm7
 
 # parsimonious model where delta <2 and fewest predictors 
-# in this case only one model (top ranked) had delta AICc <2
+# in this case only first model had fewest
 best7 <- get.models(dm7, delta<2)[[1]]
 
 # check model
 check_model(best7)
+
+
 
 # summary
 summary(best7)
@@ -2298,14 +2294,11 @@ ggplot(pred7, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic terms), the interaction between these, and individual as a random factor.
 
-Residents moved significantly further between roosts immediately post-release, before settling. 
-
-Initially after reinforcement, residents substantially increased their roost displacement (by about 132% from baseline. 116m + 50m), but this effect diminished over time according to the negative interaction term.
+Residents had been increasing their roost displacement, with a spike at reinforcement, but this declined. 
 
 **Interpretation:**
-The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. 
+The residents were disrupted by the reinforcers and had a short-term decrease in roost fidelity - perhaps to accommodate the move to the shared roost area. They then had good fidelity - perhaps reciprocal anchoring effect.
 
 ## m8: Release-site fidelity
 
@@ -2360,7 +2353,6 @@ m8 <- glmmTMB(log1p(dist_release) ~ period * (scale(as.numeric(date)) + I(scale(
 
 # model selection
 dm8 <- dredge(m8)
-dm8
 
 # parsimonious model where delta <2 and fewest predictors 
 # in this case only one model (top ranked) had delta AICc <2
@@ -2421,42 +2413,12 @@ ggplot(pred8, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these, and individual as a random factor. 
-
-The main effect of period is not significant (p=0.679), meaning there wasn't an immediate change in residents' distance from the release site right after reinforcement.
-
-The pre-reinforcement period shows strong negative linear (-1.26) and quadratic (-0.60) trends, indicating residents were already moving closer to the release site over time before reinforcement.
+The main effect of period is not significant (p=0.679). Residents were already moving closer to the release site over time before reinforcement.
 
 The significant interactions between period and time (both linear and quadratic) indicate the temporal pattern changed after reinforcement. Adding the interaction coefficients (0.38 for linear, 1.09 for quadratic) suggests a flattening or even reversal of the trend toward the release site.
 
 **Interpretation:**
 The residents were already moving back towards the release area, but slowed and stabilised with the addition of the reinforcers.
-
-### Resident change map
-
-I think it would be helpful to visualise their roost locations on a map.
-
-```{r}
-ggmap(map_z15)+
-  # plot roosts colour by time
-  geom_point(aes(longitude, latitude, colour = date),
-             size = 2, data = datam8, inherit.aes = FALSE)+
-  # add release location
-  geom_point(aes(144.434323, -37.902374), 
-             colour = "white", size = 5, shape = 13, inherit.aes = FALSE)+
-  # add fence
-  geom_spatvector(data = mtr, inherit.aes = FALSE, fill = NA, colour = "white",
-                  linetype = "longdash")+
-  # wrap by period
-  facet_wrap(~period)+
-  # theme options
-  scale_colour_viridis_c(trans = "date", name = "2023")+
-  theme_void()+
-  scale_y_continuous(expand = expansion(mult = c(0, 0.01)))+
-  ggplot2::theme(legend.position="bottom",
-        legend.key.width = unit(4, 'cm'),
-        strip.text = element_text(size = 15))
-```
 
 ## m9: Home range size
 
@@ -2464,7 +2426,7 @@ Do residents change their home range size after reinforcement?
 
 ```{r}
 # read in data and filter to residents for reinforcement period
-datam9 <- read.csv("results/daily_hr90_area.csv") %>%
+datam9 <- read.csv("results/daily_hr.csv") %>%
  # add metadata
  left_join(dplyr::select(metadata, c("id", "cohort"))) %>%
  # select only residents
@@ -2477,16 +2439,17 @@ datam9 <- read.csv("results/daily_hr90_area.csv") %>%
  mutate(period = factor(ifelse(date %in% pre_dates, 
                         "pre-reinforcement", "post-reinforcement"),
                         levels  = c("pre-reinforcement", "post-reinforcement")))
+
 # create social group means
 sum9 <- datam9 %>%
  group_by(date) %>%
- summarise(dist = mean(area),
-           upper = dist + 1.96 * std.error(area),
-           lower = dist - 1.96 * std.error(area)) %>%
+ summarise(area = mean(kud50),
+           upper = area + 1.96 * std.error(kud50),
+           lower = area - 1.96 * std.error(kud50)) %>%
  arrange(date)
 
 # plot daily distance over time as period means
-ggplot(sum9, aes(date, dist, ymin = lower, ymax = upper)) +
+ggplot(sum9, aes(date, area, ymin = lower, ymax = upper)) +
  geom_path() +
  geom_ribbon(alpha = 0.2) +
  xlab("Days post-reinforcement") + 
@@ -2497,21 +2460,20 @@ ggplot(sum9, aes(date, dist, ymin = lower, ymax = upper)) +
  geom_vline(aes(xintercept = as_date("2023-06-07")), colour = "purple")
 
 # distribution of movement data
-hist(datam9$area)
-ggqqplot(datam9$area)
+hist(datam9$kud50)
+ggqqplot(datam9$kud50)
 
 # correct left skew
-hist(log1p(datam9$area))
-ggqqplot(log1p(datam9$area))
+hist(log1p(datam9$kud50))
+ggqqplot(log1p(datam9$kud50))
 
 # test difference pre and post reinforcement
-m9 <- glmmTMB(log1p(area) ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
+m9 <- glmmTMB(log1p(kud50) ~ period * (scale(as.numeric(date)) + I(scale(as.numeric(date))^2)) + (1|id), 
              data = datam9,
              na.action = "na.fail")
 
 # model selection# moarea()del selection
 dm9 <- dredge(m9)
-dm9
 
 # parsimonious model where delta <2 and fewest predictors 
 # in this case two models had delta AICc <2 but the top ranked had fewer terms
@@ -2572,8 +2534,6 @@ ggplot(pred9, aes(date, predicted, ymin = lower, ymax = upper)) +
 ```
 
 **Results:**
-The best fitting model included period (pre or post reinforcement), date (linear and quadratic), the interaction between these (but not a quadratic and period interaction), and individual as a random factor.
-
 Immediately after reinforcement, residents reduced their home range sizes by about 35%.
 However, the strong positive interaction term indicates this pattern reversed over time, with home ranges expanding again during the post-reinforcement period.
 
